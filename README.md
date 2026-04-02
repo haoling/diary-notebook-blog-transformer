@@ -187,6 +187,21 @@ appDataFolder/
 
 appDataFolder 内の JSON ファイルとして保存します。
 
+「取り込み」「段落分割」「OCR」は独立したステップとして設計し、それぞれ別のタイミングで実行・やり直しができます。
+
+```
+[Step 1] 取り込み       ScanPage         originalFileId を持つ
+              ↓ （任意）補正
+         correctionStatus: 'pending' | 'done' | 'skipped'
+         correctedFileId?
+
+[Step 2] 段落分割       ParagraphObject[]  各段落の切り抜き画像
+         ScanPage.splitStatus: 'pending' | 'done'
+
+[Step 3] OCR           ParagraphObject ごとに独立した status
+         ocrStatus: 'pending' | 'done' | 'skipped'
+```
+
 ```typescript
 // sessions/{sessionId}.json
 type ScanSession = {
@@ -195,18 +210,31 @@ type ScanSession = {
   pages: ScanPage[]
 }
 
+// Step 1: 取り込み・補正
 type ScanPage = {
   id: string
-  originalFileId: string     // Drive appDataFolder 内のファイル ID
-  correctedFileId: string
+  capturedAt: string
+  originalFileId: string              // 取り込んだ元画像（Drive appDataFolder）
+
+  // 補正は取り込みとは独立して実行できる
+  correctionStatus: 'pending' | 'done' | 'skipped'
+  correctedFileId?: string            // 補正後画像（補正した場合のみ）
+
+  // 段落分割は補正とは独立して実行できる
+  splitStatus: 'pending' | 'done'
   paragraphs: ParagraphObject[]
 }
 
+// Step 2: 段落分割の結果
 type ParagraphObject = {
   id: string
-  imageFileId: string        // Drive appDataFolder 内の切り抜き画像 ID
-  ocrText?: string           // OCR テキスト（任意）
-  ocrEditedText?: string     // 手動修正後テキスト
+  order: number                       // ページ内の順序
+  imageFileId: string                 // 切り抜き画像（Drive appDataFolder）
+
+  // OCR は段落ごとに独立して実行できる
+  ocrStatus: 'pending' | 'done' | 'skipped'
+  ocrText?: string                    // Step 3: OCR 結果（任意）
+  ocrEditedText?: string              // 手動修正後テキスト
 }
 
 // articles/{articleId}.json
@@ -226,34 +254,54 @@ type Article = {
 
 ## 処理フロー
 
+Step 1〜3 はそれぞれ独立しており、任意のタイミングで実行・やり直しができます。
+
 ```
-1. [Google ログイン]
+0. [Google ログイン]
    Google Identity Services でサインイン（ブラウザのみ・サーバー不要）
    → Drive appDataFolder へのアクセス権を取得
 
-2. [スキャン入力]
-   スマホ撮影 or スキャナ取込 or ファイルアップロード
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Step 1  取り込み  （ScanPage を作る）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   スマホ撮影 / スキャナ取込 / ファイルアップロード
+   → 元画像を Drive appDataFolder に保存（correctionStatus: 'pending'）
+   ↓ （任意）台形補正・傾き補正・コントラスト調整（OpenCV.js）
+   → 補正後画像を保存（correctionStatus: 'done'）
 
-3. [画像補正]（ブラウザ内 / OpenCV.js）
-   台形補正 → 傾き補正 → 二値化・コントラスト調整
-   → 補正後画像を Drive appDataFolder に保存
+   ※ 補正は後からやり直し可能。スキャナ画像など補正不要なら 'skipped'。
 
-4. [段落検出]（ブラウザ内 / OpenCV.js）
-   水平罫線・余白・書式から文節境界を自動検出
-   → 各段落を切り抜き、Drive appDataFolder に個別保存
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Step 2  段落分割  （ParagraphObject[] を作る）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   補正済み（または元）画像から水平罫線・余白で文節境界を自動検出（OpenCV.js）
+   → 各段落を切り抜き、Drive appDataFolder に個別保存（splitStatus: 'done'）
 
-5. [OCR]（任意）
-   Tesseract.js（オフライン・無料）または Google Cloud Vision API（高精度・要 API キー設定）
-   → 結果をメタデータ JSON に書き込み
+   ※ Step 1 とは独立。取り込み済みページを後からまとめて分割することも可能。
+   ※ 自動検出結果を手動で調整（分割線の追加・削除）してから確定できる。
 
-6. [写真インポート]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Step 3  OCR  （任意・段落ごとに独立）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   段落オブジェクト単位で OCR を実行（ocrStatus: 'done'）
+   エンジン選択：
+     - Tesseract.js（オフライン・無料・ブラウザ内）
+     - Google Cloud Vision API（高精度・要 API キー設定）
+   → OCR 結果を手動修正可能（ocrEditedText）
+
+   ※ Step 2 とは独立。「この段落だけ OCR する」「後でまとめて OCR する」が可能。
+   ※ テキスト化不要な段落は 'skipped' のまま画像として使用。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. [写真インポート]
    Google Photos / Amazon Photos / Google Drive / ローカル から選択
 
-7. [記事編集]
+2. [記事編集]
    段落オブジェクト + 写真オブジェクトをエディタ上で自由に配置
    → article JSON を Drive appDataFolder に保存
 
-8. [公開]
+3. [公開]
    WordPress（公開/下書き/非公開）
    Zenn（GitHub push 経由）
    またはアプリ内のみ（プライベート）
