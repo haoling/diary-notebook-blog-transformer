@@ -31,49 +31,40 @@
 | **OCR はオプション** | テキスト化せず画像のまま保持することも可能。OCR 精度が低い場合は手動修正で補完 |
 | **公開先は後から決める** | 記事を作成してから公開先（WordPress・Zenn・非公開）を選択できる |
 | **段階的な処理** | スキャン→補正→OCR→編集→公開 の各ステップを独立して実行・やり直しできる |
-| **サーバーレス・ゼロ管理** | アプリ側にDBもストレージも持たない。ユーザーデータはユーザー自身の Google Drive に保存する |
+| **完全サーバーレス・無料運用** | サーバー・DB・ストレージを一切持たない。ユーザーデータはユーザー自身の Google Drive に保存。ホスティングは GitHub Pages で無料 |
 
 ---
 
 ## アーキテクチャ方針
 
-### サーバー側にデータを持たない
+### すべてブラウザ完結・サーバーなし
 
-本システムは **Google ログイン必須** とし、すべてのユーザーデータを **ユーザー自身の Google Drive appDataFolder** に保存します。
+認証からデータ保存・画像処理まですべてブラウザ内で完結します。サーバーは不要です。
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  ブラウザ (Next.js クライアント)                        │
-│                                                       │
-│  ┌──────────────┐    ┌──────────────────────────┐   │
-│  │  画像処理     │    │  Google Drive appDataFolder│   │
-│  │  OpenCV.js   │◀──▶│  (ユーザー自身の Drive)    │   │
-│  │  (WASM)      │    │  ・JSON メタデータファイル  │   │
-│  └──────────────┘    │  ・スキャン画像ファイル     │   │
-│                       │  ・段落切り抜き画像        │   │
-│  ┌──────────────┐    └──────────────────────────┘   │
-│  │  OCR         │                                     │
-│  │  Tesseract.js│    ┌──────────────────────────┐   │
-│  │  (WASM)      │    │  Google Cloud Vision API  │   │
-│  │  または      │◀──▶│  (高精度 OCR / オプション) │   │
-│  │  Vision API  │    └──────────────────────────┘   │
-│  └──────────────┘                                     │
-└─────────────────────────────────────────────────────┘
-         ▲
-         │ Serverless Edge Functions (Next.js / Vercel)
-         │ ・Google OAuth トークン交換
-         │ ・Vision API プロキシ（API キー隠蔽）
-         ▼
-┌──────────────────────────────────────────────────────┐
-│  外部公開先                                            │
-│  WordPress REST API  /  Zenn (GitHub push)            │
-└──────────────────────────────────────────────────────┘
+ブラウザ (静的サイト / Next.js Static Export)
+  │
+  ├── Google Identity Services    ← Google OAuth (クライアントのみ・サーバー不要)
+  │
+  ├── Google Drive API v3         ← appDataFolder に全データ保存
+  │     ├── JSON メタデータ
+  │     ├── スキャン画像
+  │     └── 段落切り抜き画像
+  │
+  ├── OpenCV.js (WebAssembly)     ← 台形補正・段落検出 (ブラウザ内処理)
+  │
+  ├── Tesseract.js (WebAssembly)  ← OCR・無料・オフライン (ブラウザ内処理)
+  │
+  └── Google Cloud Vision API     ← 高精度 OCR (オプション)
+        ※ ユーザーが自分の GCP API キーを設定 → appDataFolder に保存
+
+ホスティング: GitHub Pages（完全無料）
 ```
 
 ### Google Drive appDataFolder とは
 
 - ユーザーの Google Drive 内にアプリ専用の隠しフォルダとして作成される領域
-- Drive の通常フォルダには表示されず、このアプリのみがアクセス可能
+- Drive の通常 UI には表示されず、このアプリのみがアクセス可能
 - ユーザー自身の Drive 容量を使用するため、アプリ側にストレージコストが発生しない
 - ユーザーはいつでも「接続済みアプリの削除」でデータを完全削除できる（プライバシー）
 - 必要な OAuth スコープ: `https://www.googleapis.com/auth/drive.appdata`
@@ -82,15 +73,16 @@
 
 ```
 appDataFolder/
-├── index.json                    # セッション・記事の一覧インデックス
+├── index.json                     # セッション・記事の一覧インデックス
+├── settings.json                  # ユーザー設定（暗号化 API キーなど）
 ├── sessions/
-│   └── {sessionId}.json          # スキャンセッションのメタデータ
+│   └── {sessionId}.json           # スキャンセッションのメタデータ
 ├── articles/
-│   └── {articleId}.json          # 記事データ（ブロック配列）
+│   └── {articleId}.json           # 記事データ（ブロック配列）
 └── images/
-    ├── scan_{pageId}_original.jpg # 補正前の元画像
-    ├── scan_{pageId}_corrected.jpg# 補正後画像
-    └── para_{paragraphId}.jpg     # 段落切り抜き画像
+    ├── scan_{pageId}_original.jpg  # 補正前の元画像
+    ├── scan_{pageId}_corrected.jpg # 補正後画像
+    └── para_{paragraphId}.jpg      # 段落切り抜き画像
 ```
 
 ---
@@ -101,33 +93,33 @@ appDataFolder/
 
 | 技術 | 用途 |
 |------|------|
-| **Next.js (App Router)** | Web アプリ本体。Static Export + Edge Functions で完全サーバーレス |
+| **Next.js (Static Export)** | Web アプリ本体。`output: 'export'` で完全静的化 |
 | **TypeScript** | 型安全な開発 |
 | **Tailwind CSS** | UI スタイリング |
 | **dnd-kit** | 段落・写真オブジェクトのドラッグ&ドロップ配置エディタ |
 | **react-dropzone** | ローカルファイルのドラッグ&ドロップアップロード |
 
-### 認証・ストレージ
+### 認証・ストレージ（すべてクライアントサイド）
 
 | 技術 | 用途 | 備考 |
 |------|------|------|
-| **NextAuth.js (Google Provider)** | Google OAuth 認証（必須） | access_token を Drive API に使用 |
-| **Google Drive API v3** | appDataFolder への JSON・画像ファイルの読み書き | サーバー側DBの代替 |
+| **Google Identity Services** | Google OAuth 認証（クライアントのみ） | サーバー不要。`@react-oauth/google` |
+| **Google Drive API v3** | appDataFolder への JSON・画像ファイルの読み書き | fetch で直接呼び出し |
 | **Google Drive appDataFolder** | ユーザーデータの永続化ストレージ | ユーザーの Drive 容量を使用 |
 
-### 画像処理（クライアントサイド）
+### 画像処理（ブラウザ内 WebAssembly）
 
-| 技術 | 用途 | 備考 |
-|------|------|------|
-| **OpenCV.js (WebAssembly)** | 透視変換による台形補正・傾き補正 | ブラウザ内で処理。サーバー不要 |
-| **Canvas API** | 画像の切り抜き・リサイズ・前処理 | ネイティブブラウザ API |
+| 技術 | 用途 |
+|------|------|
+| **OpenCV.js (WebAssembly)** | 透視変換による台形補正・傾き補正・段落境界検出 |
+| **Canvas API** | 画像の切り抜き・リサイズ・前処理 |
 
 ### OCR
 
 | 技術 | 用途 | 備考 |
 |------|------|------|
-| **Tesseract.js (WebAssembly)** | オフライン OCR（無料） | ブラウザ内で処理。手書きの精度は低め |
-| **Google Cloud Vision API** | 高精度 OCR・手書き対応（オプション） | Edge Function 経由でプロキシ。有料 |
+| **Tesseract.js (WebAssembly)** | オフライン OCR（無料） | ブラウザ内処理。手書きの精度は低め |
+| **Google Cloud Vision API** | 高精度 OCR・手書き対応（オプション） | ユーザーが自分の GCP API キーを設定して使用 |
 
 ### 外部連携
 
@@ -139,11 +131,12 @@ appDataFolder/
 | **WordPress REST API** | WordPress へ記事公開 |
 | **Zenn CLI / Zenn GitHub 連携** | Zenn へ記事公開 (Markdown + GitHub push) |
 
-### デプロイ
+### ホスティング
 
-| 技術 | 用途 |
-|------|------|
-| **Vercel** | Next.js のホスティング。Edge Functions でトークン交換・API プロキシ |
+| 技術 | 用途 | 費用 |
+|------|------|------|
+| **GitHub Pages** | 静的サイトのホスティング | **無料** |
+| **GitHub Actions** | `next build` → `out/` を GitHub Pages へ自動デプロイ | **無料** |
 
 ---
 
@@ -177,16 +170,16 @@ appDataFolder/
 | **ObjectCard** | 各オブジェクトの表示・編集・並び替えUI | React |
 | **WordPressPublisher** | 記事を WordPress に公開（公開/下書き/非公開を選択可） | WordPress REST API |
 | **ZennPublisher** | 記事を Markdown に変換し GitHub 経由で Zenn に公開 | GitHub API, gray-matter |
-| **PrivateViewer** | 外部公開せずアプリ内でのみ閲覧 | Next.js + Google Drive 読み込み |
+| **PrivateViewer** | 外部公開せずアプリ内でのみ閲覧 | Google Drive 読み込み |
 
 ### 認証・共通
 
 | コンポーネント | 役割 | 主な技術 |
 |--------------|------|---------|
-| **AuthModule** | Google OAuth 認証・トークン管理 | NextAuth.js (Google Provider) |
+| **AuthModule** | Google OAuth 認証・アクセストークン管理 | Google Identity Services (`@react-oauth/google`) |
 | **DriveClient** | appDataFolder への統一 CRUD インターフェース | Google Drive API v3, fetch |
-| **VisionApiProxy** | API キーを隠蔽しつつ Vision API を呼び出す | Next.js Edge Function |
 | **IndexManager** | appDataFolder 内の index.json を管理し一覧を高速取得 | Google Drive API v3 |
+| **SettingsManager** | Vision API キーなどのユーザー設定を appDataFolder に保存 | Google Drive API v3 |
 
 ---
 
@@ -204,16 +197,16 @@ type ScanSession = {
 
 type ScanPage = {
   id: string
-  originalFileId: string    // Drive appDataFolder 内のファイル ID
+  originalFileId: string     // Drive appDataFolder 内のファイル ID
   correctedFileId: string
   paragraphs: ParagraphObject[]
 }
 
 type ParagraphObject = {
   id: string
-  imageFileId: string       // Drive appDataFolder 内の切り抜き画像 ID
-  ocrText?: string          // OCR テキスト（任意）
-  ocrEditedText?: string    // 手動修正後テキスト
+  imageFileId: string        // Drive appDataFolder 内の切り抜き画像 ID
+  ocrText?: string           // OCR テキスト（任意）
+  ocrEditedText?: string     // 手動修正後テキスト
 }
 
 // articles/{articleId}.json
@@ -235,7 +228,7 @@ type Article = {
 
 ```
 1. [Google ログイン]
-   Google OAuth でサインイン
+   Google Identity Services でサインイン（ブラウザのみ・サーバー不要）
    → Drive appDataFolder へのアクセス権を取得
 
 2. [スキャン入力]
@@ -250,7 +243,7 @@ type Article = {
    → 各段落を切り抜き、Drive appDataFolder に個別保存
 
 5. [OCR]（任意）
-   Tesseract.js（オフライン）または Google Cloud Vision API（高精度）で OCR
+   Tesseract.js（オフライン・無料）または Google Cloud Vision API（高精度・要 API キー設定）
    → 結果をメタデータ JSON に書き込み
 
 6. [写真インポート]
@@ -265,6 +258,18 @@ type Article = {
    Zenn（GitHub push 経由）
    またはアプリ内のみ（プライベート）
 ```
+
+---
+
+## 運用コスト
+
+| 項目 | 費用 |
+|------|------|
+| ホスティング (GitHub Pages) | **無料** |
+| 認証 (Google Identity Services) | **無料** |
+| ストレージ (Google Drive appDataFolder) | **無料**（ユーザーの Drive 容量を使用） |
+| 画像処理・OCR (OpenCV.js / Tesseract.js) | **無料**（ブラウザ内処理） |
+| 高精度 OCR (Google Cloud Vision API) | ユーザーが自分の GCP アカウントで負担（オプション） |
 
 ---
 
