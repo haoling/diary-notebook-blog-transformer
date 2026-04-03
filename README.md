@@ -189,18 +189,8 @@ appDataFolder 内の JSON ファイルとして保存します。
 
 「取り込み」「段落分割」「OCR」は独立したステップとして設計し、それぞれ別のタイミングで実行・やり直しができます。
 
-```
-[Step 1] 取り込み       ScanPage         originalFileId を持つ
-              ↓ （任意）補正
-         correctionStatus: 'pending' | 'done' | 'skipped'
-         correctedFileId?
-
-[Step 2] 段落分割       ParagraphObject[]  各段落の切り抜き画像
-         ScanPage.splitStatus: 'pending' | 'done'
-
-[Step 3] OCR           ParagraphObject ごとに独立した status
-         ocrStatus: 'pending' | 'done' | 'skipped'
-```
+ステップの実行状態はステータスフラグではなく、**結果オブジェクトの有無**で表現します。
+`correction` が `undefined` なら「補正未実施」、存在すれば「補正済み」です。
 
 ```typescript
 // sessions/{sessionId}.json
@@ -210,31 +200,44 @@ type ScanSession = {
   pages: ScanPage[]
 }
 
-// Step 1: 取り込み・補正
+// Step 1: 取り込み（必須）
 type ScanPage = {
   id: string
   capturedAt: string
-  originalFileId: string              // 取り込んだ元画像（Drive appDataFolder）
+  originalFileId: string     // 取り込んだ元画像（Drive appDataFolder）
 
-  // 補正は取り込みとは独立して実行できる
-  correctionStatus: 'pending' | 'done' | 'skipped'
-  correctedFileId?: string            // 補正後画像（補正した場合のみ）
+  correction?: CorrectionResult  // undefined = 補正未実施
+  split?: SplitResult            // undefined = 段落分割未実施
+}
 
-  // 段落分割は補正とは独立して実行できる
-  splitStatus: 'pending' | 'done'
+// Step 1b: 補正（任意）
+type CorrectionResult = {
+  correctedAt: string
+  fileId: string             // 補正後画像（Drive appDataFolder）
+  skipped: boolean           // スキャナ画像など補正不要だった場合
+}
+
+// Step 2: 段落分割
+type SplitResult = {
+  splitAt: string
   paragraphs: ParagraphObject[]
 }
 
-// Step 2: 段落分割の結果
 type ParagraphObject = {
   id: string
-  order: number                       // ページ内の順序
-  imageFileId: string                 // 切り抜き画像（Drive appDataFolder）
+  order: number              // ページ内の順序
+  imageFileId: string        // 切り抜き画像（Drive appDataFolder）
 
-  // OCR は段落ごとに独立して実行できる
-  ocrStatus: 'pending' | 'done' | 'skipped'
-  ocrText?: string                    // Step 3: OCR 結果（任意）
-  ocrEditedText?: string              // 手動修正後テキスト
+  ocr?: OcrResult            // undefined = OCR 未実施
+}
+
+// Step 3: OCR（任意・段落ごとに独立）
+type OcrResult = {
+  ocrAt: string
+  engine: 'tesseract' | 'vision'
+  text: string
+  editedText?: string        // 手動修正後テキスト
+  skipped: boolean           // テキスト化不要な段落の場合
 }
 
 // articles/{articleId}.json
