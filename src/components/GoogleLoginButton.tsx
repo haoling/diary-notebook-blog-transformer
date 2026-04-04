@@ -10,7 +10,12 @@ export function GoogleLoginButton() {
       onClick={login}
       className="inline-flex items-center gap-3 rounded-xl bg-white px-8 py-4 text-base font-medium text-slate-700 shadow-md transition-all hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
     >
-      <svg className="h-6 w-6" viewBox="0 0 24 24">
+      <svg
+        className="h-6 w-6"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        focusable="false"
+      >
         <path
           d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
           fill="#4285F4"
