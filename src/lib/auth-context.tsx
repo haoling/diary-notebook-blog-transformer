@@ -47,10 +47,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useGoogleLogin({
     onSuccess: async (tokenResponse) => {
-      const token = tokenResponse.access_token;
-      const userInfo = await fetchUserInfo(token);
-      setUser(userInfo);
-      setAccessToken(token);
+      try {
+        const token = tokenResponse.access_token;
+        const userInfo = await fetchUserInfo(token);
+        setUser(userInfo);
+        setAccessToken(token);
+      } catch {
+        googleLogout();
+        setUser(null);
+        setAccessToken(null);
+      }
     },
     onError: () => {
       googleLogout();
