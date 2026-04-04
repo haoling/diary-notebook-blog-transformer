@@ -1,0 +1,39 @@
+{
+  "name": "diary-notebook-blog-transformer",
+  "version": "1.0.0",
+  "description": "> システム手帳に書いた日記はデジタルにして、デジカメで撮った写真と一緒にブログ形式になるべきだと思うんですよ",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/haoling/diary-notebook-blog-transformer.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/haoling/diary-notebook-blog-transformer/issues"
+  },
+  "homepage": "https://github.com/haoling/diary-notebook-blog-transformer#readme",
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@react-oauth/google": "^0.13.4",
+    "@tailwindcss/postcss": "^4.2.2",
+    "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
+    "next": "^16.2.2",
+    "postcss": "^8.5.8",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-dropzone": "^15.0.0",
+    "tailwindcss": "^4.2.2",
+    "tesseract.js": "^7.0.0",
+    "typescript": "^6.0.2"
+  }
+}
