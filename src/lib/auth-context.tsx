@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react";
 import { useGoogleLogin, googleLogout } from "@react-oauth/google";
@@ -33,6 +34,17 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const expireTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearAuth = useCallback(() => {
+    googleLogout();
+    setUser(null);
+    setAccessToken(null);
+    if (expireTimer.current) {
+      clearTimeout(expireTimer.current);
+      expireTimer.current = null;
+    }
+  }, []);
 
   const fetchUserInfo = useCallback(async (token: string) => {
     const res = await fetch(
@@ -52,26 +64,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userInfo = await fetchUserInfo(token);
         setUser(userInfo);
         setAccessToken(token);
+        if (expireTimer.current) clearTimeout(expireTimer.current);
+        const expiresInMs = (tokenResponse.expires_in ?? 3600) * 1000;
+        const buffer = 60_000;
+        expireTimer.current = setTimeout(clearAuth, expiresInMs - buffer);
       } catch {
-        googleLogout();
-        setUser(null);
-        setAccessToken(null);
+        clearAuth();
       }
     },
-    onError: () => {
-      googleLogout();
-      setUser(null);
-      setAccessToken(null);
-    },
+    onError: clearAuth,
     scope:
       "openid email profile https://www.googleapis.com/auth/drive.appdata",
   });
 
   const logout = useCallback(() => {
-    googleLogout();
-    setUser(null);
-    setAccessToken(null);
-  }, []);
+    clearAuth();
+  }, [clearAuth]);
 
   return (
     <AuthContext.Provider
