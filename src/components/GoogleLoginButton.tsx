@@ -3,15 +3,14 @@
 import { useAuth } from "@/lib/auth-context";
 
 export function GoogleLoginButton() {
-  const { login, isLoading } = useAuth();
+  const { login } = useAuth();
 
   return (
     <button
       onClick={login}
-      disabled={isLoading}
-      className="inline-flex items-center gap-3 rounded-lg border border-slate-300 bg-white px-6 py-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+      className="inline-flex items-center gap-3 rounded-xl bg-white px-8 py-4 text-base font-medium text-slate-700 shadow-md transition-all hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
     >
-      <svg className="h-5 w-5" viewBox="0 0 24 24">
+      <svg className="h-6 w-6" viewBox="0 0 24 24">
         <path
           d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
           fill="#4285F4"
@@ -29,7 +28,7 @@ export function GoogleLoginButton() {
           fill="#EA4335"
         />
       </svg>
-      Google でログイン
+      Google でログインして始める
     </button>
   );
 }

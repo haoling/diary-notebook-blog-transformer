@@ -5,7 +5,6 @@ import {
   useContext,
   useState,
   useCallback,
-  useEffect,
   type ReactNode,
 } from "react";
 import { useGoogleLogin, googleLogout } from "@react-oauth/google";
@@ -25,52 +24,15 @@ interface AuthContextValue {
   user: UserInfo | null;
   accessToken: string | null;
   isAuthenticated: boolean;
-  isLoading: boolean;
   login: () => void;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const STORAGE_KEY = "google_auth";
-
-function loadStoredAuth(): {
-  user: UserInfo | null;
-  accessToken: string | null;
-} {
-  if (typeof window === "undefined") return { user: null, accessToken: null };
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { user: null, accessToken: null };
-    const data = JSON.parse(raw);
-    return { user: data.user ?? null, accessToken: data.accessToken ?? null };
-  } catch {
-    return { user: null, accessToken: null };
-  }
-}
-
-function storeAuth(user: UserInfo | null, accessToken: string | null) {
-  if (typeof window === "undefined") return;
-  if (user && accessToken) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ user, accessToken }));
-  } else {
-    localStorage.removeItem(STORAGE_KEY);
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const stored = loadStoredAuth();
-    if (stored.user && stored.accessToken) {
-      setUser(stored.user);
-      setAccessToken(stored.accessToken);
-    }
-    setIsLoading(false);
-  }, []);
 
   const fetchUserInfo = useCallback(async (token: string) => {
     const res = await fetch(
@@ -89,10 +51,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userInfo = await fetchUserInfo(token);
       setUser(userInfo);
       setAccessToken(token);
-      storeAuth(userInfo, token);
     },
     onError: () => {
-      logout();
+      googleLogout();
+      setUser(null);
+      setAccessToken(null);
     },
     scope:
       "openid email profile https://www.googleapis.com/auth/drive.appdata",
@@ -102,7 +65,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     googleLogout();
     setUser(null);
     setAccessToken(null);
-    storeAuth(null, null);
   }, []);
 
   return (
@@ -111,7 +73,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         accessToken,
         isAuthenticated: !!user && !!accessToken,
-        isLoading,
         login,
         logout,
       }}

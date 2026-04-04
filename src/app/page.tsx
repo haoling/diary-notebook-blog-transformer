@@ -4,31 +4,22 @@ import { useAuth } from "@/lib/auth-context";
 import { GoogleLoginButton } from "@/components/GoogleLoginButton";
 import { UserProfile } from "@/components/UserProfile";
 
-export default function Home() {
-  const { isAuthenticated, isLoading } = useAuth();
-
+function LandingPage() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
       <div className="max-w-4xl mx-auto px-4 py-16">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-12">
-          <div>
-            <h1 className="text-4xl font-bold text-slate-800 mb-4">
-              📓 Diary Notebook Blog Transformer
-            </h1>
-            <p className="text-lg text-slate-600">
-              システム手帳に書いた日記はデジタルにして、デジカメで撮った写真と一緒にブログ形式になるべきだと思うんですよ
-            </p>
-          </div>
-          <div className="shrink-0 ml-4">
-            {isLoading ? (
-              <div className="h-9 w-9 animate-pulse rounded-full bg-slate-200" />
-            ) : isAuthenticated ? (
-              <UserProfile />
-            ) : (
-              <GoogleLoginButton />
-            )}
-          </div>
+        {/* Hero */}
+        <div className="text-center mb-16">
+          <h1 className="text-4xl font-bold text-slate-800 mb-4">
+            📓 Diary Notebook Blog Transformer
+          </h1>
+          <p className="text-lg text-slate-600 mb-8">
+            システム手帳に書いた日記はデジタルにして、デジカメで撮った写真と一緒にブログ形式になるべきだと思うんですよ
+          </p>
+          <GoogleLoginButton />
+          <p className="mt-4 text-sm text-slate-400">
+            ログインすると、ノートの取り込み・OCR・記事編集が使えます
+          </p>
         </div>
 
         {/* Workflow Steps */}
@@ -43,7 +34,7 @@ export default function Home() {
 
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
             <div className="text-3xl mb-3">✂️</div>
-            <h2 className="text-xl font-semibold text-slate-800 mb-2">Step 2: 段落分割 & OCR</h2>
+            <h2 className="text-xl font-semibold text-slate-800 mb-2">Step 2: 段落分割 &amp; OCR</h2>
             <p className="text-slate-600">
               OpenCV.js で段落を検出し、Tesseract.js でテキスト化します
             </p>
@@ -51,7 +42,7 @@ export default function Home() {
 
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
             <div className="text-3xl mb-3">📝</div>
-            <h2 className="text-xl font-semibold text-slate-800 mb-2">Step 3: 記事編集 & 公開</h2>
+            <h2 className="text-xl font-semibold text-slate-800 mb-2">Step 3: 記事編集 &amp; 公開</h2>
             <p className="text-slate-600">
               段落・写真を配置して WordPress / Zenn に公開します
             </p>
@@ -114,4 +105,26 @@ export default function Home() {
       </div>
     </main>
   );
+}
+
+function AppShell() {
+  return (
+    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
+          <span className="text-lg font-bold text-slate-800">📓 DNBT</span>
+          <UserProfile />
+        </div>
+      </header>
+      <div className="max-w-4xl mx-auto px-4 py-16 text-center">
+        <p className="text-lg text-slate-600">ようこそ！準備ができました。</p>
+      </div>
+    </main>
+  );
+}
+
+export default function Home() {
+  const { isAuthenticated } = useAuth();
+
+  return isAuthenticated ? <AppShell /> : <LandingPage />;
 }
