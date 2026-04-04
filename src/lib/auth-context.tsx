@@ -74,7 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (expireTimer.current) clearTimeout(expireTimer.current);
         const expiresInMs = (tokenResponse.expires_in ?? 3600) * 1000;
         const buffer = 60_000;
-        expireTimer.current = setTimeout(clearAuth, expiresInMs - buffer);
+        const logoutDelayMs = Math.max(0, expiresInMs - buffer);
+        expireTimer.current = setTimeout(clearAuth, logoutDelayMs);
       } catch {
         clearAuth();
       }
