@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint src/"
   },
   "repository": {
     "type": "git",
@@ -35,5 +35,12 @@
     "tailwindcss": "^4.2.2",
     "tesseract.js": "^7.0.0",
     "typescript": "^6.0.2"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.2",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "globals": "^17.4.0"
   }
 }
