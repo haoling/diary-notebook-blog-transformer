@@ -1,15 +1,34 @@
+"use client";
+
+import { useAuth } from "@/lib/auth-context";
+import { GoogleLoginButton } from "@/components/GoogleLoginButton";
+import { UserProfile } from "@/components/UserProfile";
+
 export default function Home() {
+  const { isAuthenticated, isLoading } = useAuth();
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
       <div className="max-w-4xl mx-auto px-4 py-16">
         {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-slate-800 mb-4">
-            📓 Diary Notebook Blog Transformer
-          </h1>
-          <p className="text-lg text-slate-600">
-            システム手帳に書いた日記はデジタルにして、デジカメで撮った写真と一緒にブログ形式になるべきだと思うんですよ
-          </p>
+        <div className="flex items-center justify-between mb-12">
+          <div>
+            <h1 className="text-4xl font-bold text-slate-800 mb-4">
+              📓 Diary Notebook Blog Transformer
+            </h1>
+            <p className="text-lg text-slate-600">
+              システム手帳に書いた日記はデジタルにして、デジカメで撮った写真と一緒にブログ形式になるべきだと思うんですよ
+            </p>
+          </div>
+          <div className="shrink-0 ml-4">
+            {isLoading ? (
+              <div className="h-9 w-9 animate-pulse rounded-full bg-slate-200" />
+            ) : isAuthenticated ? (
+              <UserProfile />
+            ) : (
+              <GoogleLoginButton />
+            )}
+          </div>
         </div>
 
         {/* Workflow Steps */}
