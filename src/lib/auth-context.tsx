@@ -6,6 +6,7 @@ import {
   useState,
   useCallback,
   useRef,
+  useEffect,
   type ReactNode,
 } from "react";
 import { useGoogleLogin, googleLogout } from "@react-oauth/google";
@@ -44,6 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(expireTimer.current);
       expireTimer.current = null;
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (expireTimer.current) clearTimeout(expireTimer.current);
+    };
   }, []);
 
   const fetchUserInfo = useCallback(async (token: string) => {
