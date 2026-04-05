@@ -1,4 +1,4 @@
-import { parseDriveError, DriveError, DriveNotFoundError } from "./drive-errors";
+import { parseDriveError, DriveNotFoundError } from "./drive-errors";
 
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 
@@ -15,6 +15,11 @@ export type DriveFile = {
 export type DriveClientOptions = {
   accessToken: string;
 };
+
+/** Drive API のクエリ文字列値をエスケープする（`'` と `\` ）。 */
+function escapeDriveQueryValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
 
 /**
  * Google Drive API v3 をラップするクライアント。
@@ -40,11 +45,14 @@ export class DriveClient {
   private buildHeaders(init?: RequestInit): Headers {
     const headers = new Headers({
       Authorization: `Bearer ${this.token}`,
-      "Content-Type": "application/json",
+      Accept: "application/json",
     });
     if (init?.headers) {
       const extra = new Headers(init.headers);
       extra.forEach((value, key) => headers.set(key, value));
+    }
+    if (init?.body != null && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
     }
     return headers;
   }
@@ -140,7 +148,7 @@ export class DriveClient {
   /** appDataFolder のファイルを名前で検索して取得する。 */
   async getAppDataFileByName<T extends Record<string, unknown>>(name: string): Promise<T & { _fileId: string; _file: DriveFile }> {
     const query = encodeURIComponent(
-      `'appDataFolder' in parents and name = '${name.replace(/'/g, "\\'")}' and trashed = false`,
+      `'appDataFolder' in parents and name = '${escapeDriveQueryValue(name)}' and trashed = false`,
     );
     const list = await this.apiFetch<{
       files: DriveFile[];
@@ -334,11 +342,11 @@ export class DriveClient {
 
   /** ファイルのダウンロード URL を取得する（webContentLink）。非バイナリ等で取得不可の場合は null を返す。 */
   async getDownloadUrl(fileId: string): Promise<string | null> {
-    const file = await this.apiFetch<{ webContentLink: string | null }>(
+    const file = await this.apiFetch<{ webContentLink?: string | null }>(
       `/files/${fileId}?fields=webContentLink`,
     );
 
-    return file.webContentLink;
+    return file.webContentLink ?? null;
   }
 
   // ------------------------------------------------------------------
@@ -359,7 +367,7 @@ export class DriveClient {
   /** マイドライブ内から名前でフォルダを検索する。 */
   async findFolderByName(name: string): Promise<DriveFile | null> {
     const query = encodeURIComponent(
-      `name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      `name = '${escapeDriveQueryValue(name)}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
     );
     const result = await this.apiFetch<{
       files: DriveFile[];
