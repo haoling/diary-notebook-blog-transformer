@@ -26,6 +26,7 @@ export type {
 export type {
   Settings,
   IndexSessionEntry,
+  PhotoSourceType,
   IndexPhotoEntry,
   IndexArticleEntry,
   AppIndex,
