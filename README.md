@@ -289,7 +289,7 @@ type PhotoObject = {
   id: string
   importedAt: string
   sourceType: 'google_photos' | 'google_drive'
-  sourceUrl: string            // 元ソースのURL or ファイルID
+  sourceRef: string            // 元ソースの参照（Photos は URL、Drive は fileId）
   title?: string
   takenAt?: string             // 撮影日時
   cropRect?: {                 // 切り抜き座標（任意・ピクセル）
