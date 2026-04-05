@@ -20,7 +20,7 @@ export type PerspectiveParams = {
   bottomLeft: Point;
 };
 
-/** 画像補正結果。undefined = 補正未実施。 */
+/** 画像補正結果オブジェクト。ScanPage.correction が未設定なら補正未実施。 */
 export type CorrectionResult = {
   correctedAt: string;
   skipped: boolean;
