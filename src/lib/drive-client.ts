@@ -41,6 +41,34 @@ export class DriveClient {
   // 内部ヘルパー
   // ------------------------------------------------------------------
 
+  /** Drive API で使用するフィールドの共通セット。 */
+  private static readonly DEFAULT_FIELDS = "id,name,mimeType,parents,kind";
+
+  /** multipart/related 形式のリクエストボディを構築する。 */
+  private buildMultipartBody(
+    metadata: Record<string, unknown>,
+    data: unknown,
+  ): { body: string; contentType: string; boundary: string } {
+    const boundary = "drive_boundary_" + Date.now();
+    const body = [
+      `--${boundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      JSON.stringify(metadata),
+      `--${boundary}`,
+      "Content-Type: application/json; charset=UTF-8",
+      "",
+      JSON.stringify(data),
+      `--${boundary}--`,
+    ].join("\r\n");
+
+    return {
+      body,
+      contentType: `multipart/related; boundary=${boundary}`,
+      boundary,
+    };
+  }
+
   /** デフォルトヘッダを生成し、init.headers で上書き可能にする。 */
   private buildHeaders(init?: RequestInit): Headers {
     const headers = new Headers({
@@ -110,33 +138,17 @@ export class DriveClient {
     name: string,
     data: T,
   ): Promise<DriveFile> {
-    const metadata = {
-      name,
-      parents: ["appDataFolder"],
-    };
+    const { body, contentType } = this.buildMultipartBody(
+      { name, parents: ["appDataFolder"] },
+      data,
+    );
 
-    const boundary = "drive_boundary_" + Date.now();
-    const jsonPart = JSON.stringify(metadata);
-    const dataPart = JSON.stringify(data);
-
-    const body = [
-      `--${boundary}`,
-      "Content-Type: application/json; charset=UTF-8",
-      "",
-      jsonPart,
-      `--${boundary}`,
-      "Content-Type: application/json; charset=UTF-8",
-      "",
-      dataPart,
-      `--${boundary}--`,
-    ].join("\r\n");
-
-    const url = `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+    const url = `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=${DriveClient.DEFAULT_FIELDS}`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.token}`,
-        "Content-Type": `multipart/related; boundary=${boundary}`,
+        "Content-Type": contentType,
       },
       body,
     });
@@ -195,7 +207,7 @@ export class DriveClient {
   /** ファイルのメタデータを取得する。 */
   async getFileInfo(fileId: string): Promise<DriveFile> {
     return this.apiFetch<DriveFile>(
-      `/files/${fileId}?fields=id,name,mimeType,parents,kind`,
+      `/files/${fileId}?fields=${DriveClient.DEFAULT_FIELDS}`,
     );
   }
 
@@ -218,28 +230,14 @@ export class DriveClient {
     fileId: string,
     data: T,
   ): Promise<DriveFile> {
-    const boundary = "drive_boundary_" + Date.now();
-    const metadata = JSON.stringify({});
-    const dataPart = JSON.stringify(data);
+    const { body, contentType } = this.buildMultipartBody({}, data);
 
-    const body = [
-      `--${boundary}`,
-      "Content-Type: application/json; charset=UTF-8",
-      "",
-      metadata,
-      `--${boundary}`,
-      "Content-Type: application/json; charset=UTF-8",
-      "",
-      dataPart,
-      `--${boundary}--`,
-    ].join("\r\n");
-
-    const url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`;
+    const url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=${DriveClient.DEFAULT_FIELDS}`;
     const res = await fetch(url, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${this.token}`,
-        "Content-Type": `multipart/related; boundary=${boundary}`,
+        "Content-Type": contentType,
       },
       body,
     });
@@ -255,7 +253,7 @@ export class DriveClient {
   ): Promise<DriveFile> {
     const { name, addParents, removeParents } = patch;
     const params = new URLSearchParams();
-    params.set("fields", "id,name,mimeType,parents,kind");
+    params.set("fields", DriveClient.DEFAULT_FIELDS);
 
     if (addParents) params.set("addParents", addParents);
     if (removeParents) params.set("removeParents", removeParents);
@@ -327,7 +325,7 @@ export class DriveClient {
       },
     );
 
-    const url = `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,parents,kind`;
+    const url = `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=${DriveClient.DEFAULT_FIELDS}`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -371,7 +369,7 @@ export class DriveClient {
     );
     const result = await this.apiFetch<{
       files: DriveFile[];
-    }>(`/files?q=${query}&spaces=drive&fields=files(id,name,kind)`);
+    }>(`/files?q=${query}&spaces=drive&fields=files(id,name,kind)&orderBy=name`);
 
     if (!result.files || result.files.length === 0) {
       return null;
