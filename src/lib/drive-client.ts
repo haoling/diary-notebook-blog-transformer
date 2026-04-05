@@ -1,4 +1,4 @@
-import { parseDriveError, DriveError } from "./drive-errors";
+import { parseDriveError, DriveError, DriveNotFoundError } from "./drive-errors";
 
 const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3";
 
@@ -87,10 +87,8 @@ export class DriveClient {
 
   /** 指定した URL に Bearer 付きでリクエストを送り、レスポンスを返す。 */
   private async authFetch(url: string, init?: RequestInit): Promise<Response> {
-    const res = await fetch(url, {
-      ...init,
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
+    const headers = this.buildHeaders(init);
+    const res = await fetch(url, { ...init, headers });
     await this.assertOk(res);
     return res;
   }
@@ -140,7 +138,7 @@ export class DriveClient {
   }
 
   /** appDataFolder のファイルを名前で検索して取得する。 */
-  async getAppDataFileByName<T>(name: string): Promise<T & { _fileId: string; _file: DriveFile }> {
+  async getAppDataFileByName<T extends Record<string, unknown>>(name: string): Promise<T & { _fileId: string; _file: DriveFile }> {
     const query = encodeURIComponent(
       `'appDataFolder' in parents and name = '${name.replace(/'/g, "\\'")}' and trashed = false`,
     );
@@ -149,9 +147,8 @@ export class DriveClient {
     }>(`/files?q=${query}&spaces=appDataFolder&fields=files(id,name,kind)`);
 
     if (!list.files || list.files.length === 0) {
-      throw new DriveError(
+      throw new DriveNotFoundError(
         `appDataFolder に '${name}' が見つかりません。`,
-        404,
       );
     }
 
@@ -169,11 +166,12 @@ export class DriveClient {
       const pageQuery = nextPageToken
         ? `&pageToken=${encodeURIComponent(nextPageToken)}`
         : "";
+      const q = encodeURIComponent("trashed = false");
       const result = await this.apiFetch<{
         files?: DriveFile[];
         nextPageToken?: string;
       }>(
-        `/files?spaces=appDataFolder&fields=files(id,name,kind),nextPageToken&pageSize=100${pageQuery}`,
+        `/files?q=${q}&spaces=appDataFolder&fields=files(id,name,kind),nextPageToken&pageSize=100${pageQuery}`,
       );
       files.push(...(result.files ?? []));
       nextPageToken = result.nextPageToken;
@@ -365,7 +363,7 @@ export class DriveClient {
     });
   }
 
-  /** ルート配下から名前でフォルダを検索する。 */
+  /** マイドライブ内から名前でフォルダを検索する。 */
   async findFolderByName(name: string): Promise<DriveFile | null> {
     const query = encodeURIComponent(
       `name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
