@@ -11,24 +11,24 @@ export class DriveError extends Error {
 
 /** 401 — アクセストークン失効。再認証が必要。 */
 export class DriveAuthError extends DriveError {
-  constructor(message = "アクセストークンが失効しました。再ログインしてください。") {
-    super(message, 401);
+  constructor(message?: string) {
+    super(message ?? "アクセストークンが失効しました。再ログインしてください。", 401);
     this.name = "DriveAuthError";
   }
 }
 
 /** 403 — 権限不足。 */
 export class DrivePermissionError extends DriveError {
-  constructor(message = "このリソースへのアクセス権限がありません。") {
-    super(message, 403);
+  constructor(message?: string) {
+    super(message ?? "このリソースへのアクセス権限がありません。", 403);
     this.name = "DrivePermissionError";
   }
 }
 
 /** 404 — リソースが見つからない。 */
 export class DriveNotFoundError extends DriveError {
-  constructor(message = "指定されたファイルが見つかりません。") {
-    super(message, 404);
+  constructor(message?: string) {
+    super(message ?? "指定されたファイルが見つかりません。", 404);
     this.name = "DriveNotFoundError";
   }
 }
@@ -36,10 +36,10 @@ export class DriveNotFoundError extends DriveError {
 /** 429 / 403 (rateLimit) — API クォータ超過。 */
 export class DriveQuotaExceededError extends DriveError {
   constructor(
-    message = "API のリクエスト制限に達しました。しばらく時間をおいてください。",
+    message?: string,
     statusCode?: number,
   ) {
-    super(message, statusCode ?? 429);
+    super(message ?? "API のリクエスト制限に達しました。しばらく時間をおいてください。", statusCode ?? 429);
     this.name = "DriveQuotaExceededError";
   }
 }
