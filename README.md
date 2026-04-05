@@ -11,7 +11,9 @@
 手書きの日記やノートをデジタル化し、写真と組み合わせてブログ記事として公開するまでを一貫してサポートします。
 
 ```
-[手書きノート] ──スキャン──▶ [画像補正] ──OCR──▶ [段落オブジェクト]
+[手書きノート] ──スキャン / 撮影──▶ [Google Drive 指定フォルダ]
+                                        │
+                                 [画像補正] ──OCR──▶ [段落オブジェクト]
                                                           │
 [写真] ──インポート───────────────────────────▶ [写真オブジェクト]
                                                           │
@@ -31,7 +33,8 @@
 | **OCR はオプション** | テキスト化せず画像のまま保持することも可能。OCR 精度が低い場合は手動修正で補完 |
 | **公開先は後から決める** | 記事を作成してから公開先（WordPress・Zenn・非公開）を選択できる |
 | **段階的な処理** | スキャン→補正→OCR→編集→公開 の各ステップを独立して実行・やり直しできる |
-| **完全サーバーレス・無料運用** | サーバー・DB・ストレージを一切持たない。ユーザーデータはユーザー自身の Google Drive に保存。ホスティングは GitHub Pages で無料 |
+| **ユーザーのドライブに画像を集約** | 手帳のスキャン画像は Google Drive の指定フォルダに保存。スキャナで取り込んだ画像もアプリ経由でアップロード可能 |
+| **完全サーバーレス・無料運用** | サーバー・DB を一切持たない。画像はユーザーの Google Drive 指定フォルダに、メタデータは appDataFolder に保存。ホスティングは GitHub Pages で無料 |
 
 ---
 
@@ -46,10 +49,13 @@
   │
   ├── Google Identity Services    ← Google OAuth (クライアントのみ・サーバー不要)
   │
-  ├── Google Drive API v3         ← appDataFolder に全データ保存
-  │     ├── JSON メタデータ
-  │     ├── スキャン画像
-  │     └── 段落切り抜き画像
+  ├── Google Drive API v3
+  │     ├── 指定フォルダ (可視)     ← 手帳スキャン画像の保存先
+  │     │     ├── スマホ/カメラで撮影した画像
+  │     │     └── スキャナで取り込んだ画像 (アプリ経由アップロード)
+  │     │
+  │     └── appDataFolder (非表示)  ← アプリ内部データのみ
+  │           └── JSON メタデータ (インデックス・設定・記事)
   │
   ├── OpenCV.js (WebAssembly)     ← 台形補正・段落検出 (ブラウザ内処理)
   │
@@ -61,28 +67,46 @@
 ホスティング: GitHub Pages（完全無料）
 ```
 
-### Google Drive appDataFolder とは
+### ストレージ設計
+
+Google Drive 上に **2 種類の保存領域** を使い分けます。
+
+#### 1. 手帳画像フォルダ（可視フォルダ）
+
+- ユーザーの Google Drive ルート（マイドライブ）にアプリが自動作成する指定フォルダ
+- デフォルト名: `手帳スキャン`（ユーザーが変更可能）
+- Google Drive UI から直接見える・操作できるため、ユーザーが自由にファイルを管理できる
+- アプリで撮影した画像は自動的にこのフォルダに保存される
+- スキャナで取り込んだ画像は、アプリのアップロード機能からこのフォルダに保存できる
+- 元画像のみ保存。補正パラメータ・段落の切り抜き座標はすべてメタデータ（appDataFolder）に保持
+- OAuth スコープ: `https://www.googleapis.com/auth/drive.file`（アプリが作成・開いたファイルへのアクセス）
+
+#### 2. appDataFolder（非表示フォルダ）
 
 - ユーザーの Google Drive 内にアプリ専用の隠しフォルダとして作成される領域
 - Drive の通常 UI には表示されず、このアプリのみがアクセス可能
-- ユーザー自身の Drive 容量を使用するため、アプリ側にストレージコストが発生しない
+- アプリの内部データ（インデックス・設定・記事 JSON）のみを保存し、ユーザーの目に触れない
 - ユーザーはいつでも「接続済みアプリの削除」でデータを完全削除できる（プライバシー）
-- 必要な OAuth スコープ: `https://www.googleapis.com/auth/drive.appdata`
+- OAuth スコープ: `https://www.googleapis.com/auth/drive.appdata`
 
-### ファイル構成 (appDataFolder 内)
+### ファイル構成
 
 ```
-appDataFolder/
-├── index.json                     # セッション・記事の一覧インデックス
-├── settings.json                  # ユーザー設定（暗号化 API キーなど）
+Google Drive マイドライブ/
+└── 手帳スキャン/                          ← 可視フォルダ (ユーザーもアクセス可能)
+    ├── scan_{pageId}_original.jpg        # 取り込んだ元画像 (撮影 or スキャナアップロード)
+    └── ...
+
+appDataFolder/                            ← 非表示フォルダ (アプリ内部データのみ)
+├── index.json                            # セッション・記事・写真の一覧インデックス
+├── settings.json                         # ユーザー設定 (API キー・フォルダIDなど)
 ├── sessions/
-│   └── {sessionId}.json           # スキャンセッションのメタデータ
-├── articles/
-│   └── {articleId}.json           # 記事データ（ブロック配列）
-└── images/
-    ├── scan_{pageId}_original.jpg  # 補正前の元画像
-    ├── scan_{pageId}_corrected.jpg # 補正後画像
-    └── para_{paragraphId}.jpg      # 段落切り抜き画像
+│   └── {sessionId}.json                  # スキャンセッションのメタデータ
+│                                         #   ※ 補正パラメータ・段落切り抜き座標を含む
+├── photos/
+│   └── {photoId}.json                    # 写真メタデータ
+└── articles/
+    └── {articleId}.json                  # 記事データ（ブロック配列）
 ```
 
 ---
@@ -104,8 +128,9 @@ appDataFolder/
 | 技術 | 用途 | 備考 |
 |------|------|------|
 | **Google Identity Services** | Google OAuth 認証（クライアントのみ） | サーバー不要。`@react-oauth/google` |
-| **Google Drive API v3** | appDataFolder への JSON・画像ファイルの読み書き | fetch で直接呼び出し |
-| **Google Drive appDataFolder** | ユーザーデータの永続化ストレージ | ユーザーの Drive 容量を使用 |
+| **Google Drive API v3** | 可視フォルダへの画像保存 + appDataFolder への JSON 読み書き | fetch で直接呼び出し |
+| **Google Drive 手帳画像フォルダ** | スキャン画像の保存先（ユーザーのマイドライブ内） | 撮影・アップロード画像を保存 |
+| **Google Drive appDataFolder** | アプリ内部データの永続化ストレージ | ユーザーの Drive 容量を使用 |
 
 ### 画像処理（ブラウザ内 WebAssembly）
 
@@ -126,8 +151,7 @@ appDataFolder/
 | 技術 | 用途 |
 |------|------|
 | **Google Photos API** | Google フォトから写真インポート |
-| **Amazon Photos API** | Amazon フォトから写真インポート |
-| **Google Drive API** | Drive 通常領域から画像インポート（appDataFolder とは別） |
+| **Google Drive API** | Drive から写真画像インポート |
 | **WordPress REST API** | WordPress へ記事公開 |
 | **Zenn CLI / Zenn GitHub 連携** | Zenn へ記事公開 (Markdown + GitHub push) |
 
@@ -146,21 +170,20 @@ appDataFolder/
 
 | コンポーネント | 役割 | 主な技術 |
 |--------------|------|---------|
-| **ImageCaptureModule** | スマホカメラ撮影・スキャナ取込・ファイルアップロードの受け付け | react-dropzone, MediaDevices API |
+| **ImageCaptureModule** | スマホカメラ撮影（→ Drive指定フォルダへ自動保存） | react-dropzone, MediaDevices API |
+| **ScannerUploadModule** | スキャナで取り込んだ画像をアプリ経由で Drive指定フォルダにアップロード | File API, Google Drive API v3 |
 | **PerspectiveCorrectionModule** | 台形補正・傾き補正（ブラウザ内処理） | OpenCV.js (WASM), Canvas API |
 | **PreprocessingModule** | 二値化・コントラスト調整・ノイズ除去 | Canvas API, OpenCV.js |
 | **OcrModule** | 手書き/印刷文字の OCR テキスト化（任意） | Tesseract.js / Google Cloud Vision API |
-| **ParagraphDetectionModule** | 水平罫線・余白・書式から文節を検出し段落オブジェクトに分割 | OpenCV.js 輪郭検出 |
-| **DriveStorageModule** | 段落・写真オブジェクトを Google Drive appDataFolder に保存・読み込み | Google Drive API v3 |
+| **ParagraphDetectionModule** | 水平罫線・余白・書式から文節を検出し、切り抜き座標を段落オブジェクトに記録 | OpenCV.js 輪郭検出 |
+| **DriveStorageModule** | 段落・写真オブジェクト（JSON）を appDataFolder に保存・読み込みし、可視フォルダでは元画像のみを扱う | Google Drive API v3 |
 
 ### フォトインポート
 
 | コンポーネント | 役割 | 主な技術 |
 |--------------|------|---------|
 | **GooglePhotosConnector** | Google フォトから写真を検索・インポート | Google Photos API, OAuth2 |
-| **AmazonPhotosConnector** | Amazon フォトから写真を検索・インポート | Amazon Photos API, OAuth2 |
-| **GoogleDriveConnector** | Google Drive 通常領域から画像ファイルをインポート | Google Drive API v3 |
-| **LocalUploadConnector** | ローカルからの直接アップロード | File API, react-dropzone |
+| **GoogleDriveConnector** | Google Drive から画像ファイルをインポート | Google Drive API v3 |
 
 ### エディタ・公開
 
@@ -177,15 +200,16 @@ appDataFolder/
 | コンポーネント | 役割 | 主な技術 |
 |--------------|------|---------|
 | **AuthModule** | Google OAuth 認証・アクセストークン管理 | Google Identity Services (`@react-oauth/google`) |
-| **DriveClient** | appDataFolder への統一 CRUD インターフェース | Google Drive API v3, fetch |
+| **DriveClient** | 可視フォルダ + appDataFolder への統一 CRUD インターフェース | Google Drive API v3, fetch |
 | **IndexManager** | appDataFolder 内の index.json を管理し一覧を高速取得 | Google Drive API v3 |
-| **SettingsManager** | Vision API キーなどのユーザー設定を appDataFolder に保存 | Google Drive API v3 |
+| **SettingsManager** | Vision API キー・手帳画像フォルダID などのユーザー設定を appDataFolder に保存 | Google Drive API v3 |
 
 ---
 
 ## データモデル（概略）
 
 appDataFolder 内の JSON ファイルとして保存します。
+画像ファイルは Google Drive の手帳画像フォルダ（可視）に保存されます。
 
 「取り込み」「段落分割」「OCR」は独立したステップとして設計し、それぞれ別のタイミングで実行・やり直しができます。
 
@@ -204,7 +228,7 @@ type ScanSession = {
 type ScanPage = {
   id: string
   capturedAt: string
-  originalFileId: string     // 取り込んだ元画像（Drive appDataFolder）
+  originalFileId: string     // 取り込んだ元画像（Drive 手帳画像フォルダ）
 
   correction?: CorrectionResult  // undefined = 補正未実施
   split?: SplitResult            // undefined = 段落分割未実施
@@ -213,8 +237,23 @@ type ScanPage = {
 // Step 1b: 補正（任意）
 type CorrectionResult = {
   correctedAt: string
-  fileId: string             // 補正後画像（Drive appDataFolder）
-  skipped: boolean           // スキャナ画像など補正不要だった場合
+  skipped: boolean                    // スキャナ画像など補正不要だった場合
+
+  perspective?: PerspectiveParams    // undefined = 台形補正なし
+  rotation?: number                  // 傾き補正角度（度）
+  adjustments?: {
+    brightness?: number
+    contrast?: number
+    sharpness?: number
+  }
+}
+
+// 台形補正パラメータ（元画像上の4隅座標）
+type PerspectiveParams = {
+  topLeft: { x: number; y: number }
+  topRight: { x: number; y: number }
+  bottomRight: { x: number; y: number }
+  bottomLeft: { x: number; y: number }
 }
 
 // Step 2: 段落分割
@@ -226,7 +265,12 @@ type SplitResult = {
 type ParagraphObject = {
   id: string
   order: number              // ページ内の順序
-  imageFileId: string        // 切り抜き画像（Drive appDataFolder）
+  cropRect: {                 // 切り抜き座標（ピクセル、補正後の仮想画像上）
+    x: number
+    y: number
+    width: number
+    height: number
+  }
 
   ocr?: OcrResult            // undefined = OCR 未実施
 }
@@ -240,14 +284,30 @@ type OcrResult = {
   skipped: boolean           // テキスト化不要な段落の場合
 }
 
+// photos/{photoId}.json
+type PhotoObject = {
+  id: string
+  importedAt: string
+  sourceType: 'google_photos' | 'google_drive'
+  sourceRef: string            // 元ソースの参照（Photos は URL、Drive は fileId）
+  title?: string
+  takenAt?: string             // 撮影日時
+  cropRect?: {                 // 切り抜き座標（任意・ピクセル）
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+}
+
 // articles/{articleId}.json
 type Article = {
   id: string
   title: string
   date: string
   blocks: Array<
-    | { type: 'paragraph'; objectId: string }
-    | { type: 'photo'; sourceType: 'google_photos' | 'amazon_photos' | 'google_drive' | 'local'; url: string }
+    | { type: 'paragraph'; sessionId: string; paragraphId: string }
+    | { type: 'photo'; photoId: string }
   >
   publishTargets: Array<'wordpress' | 'zenn' | 'private'>
 }
@@ -262,35 +322,46 @@ Step 1〜3 はそれぞれ独立しており、任意のタイミングで実行
 ```
 0. [Google ログイン]
    Google Identity Services でサインイン（ブラウザのみ・サーバー不要）
-   → Drive appDataFolder へのアクセス権を取得
+   → Drive 指定フォルダ + appDataFolder へのアクセス権を取得
+
+   ※ 初回起動時に Google Drive マイドライブに「手帳スキャン」フォルダを自動作成
+   ※ フォルダ名は settings.json で変更可能
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  Step 1  取り込み  （ScanPage を作る）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   スマホ撮影 / スキャナ取込 / ファイルアップロード
-   → 元画像を Drive appDataFolder に保存（correctionStatus: 'pending'）
-   ↓ （任意）台形補正・傾き補正・コントラスト調整（OpenCV.js）
-   → 補正後画像を保存（correctionStatus: 'done'）
+   A. スマホ/カメラで撮影
+      → 画像を Drive 手帳画像フォルダに自動保存
 
-   ※ 補正は後からやり直し可能。スキャナ画像など補正不要なら 'skipped'。
+   B. スキャナで取り込んだ画像をアプリ経由でアップロード
+      → Drive 手帳画像フォルダに保存
+
+   ※ どちらも Drive の手帳画像フォルダに集約されるため、
+      Google Drive UI からも画像を確認・管理できる
+
+   ↓ （任意）台形補正・傾き補正・コントラスト調整（OpenCV.js）
+   → 補正パラメータをメタデータに記録（画像ファイルは生成しない）
+   → 表示時は Canvas API + OpenCV.js で元画像に補正を適用して描画
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  Step 2  段落分割  （ParagraphObject[] を作る）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    補正済み（または元）画像から水平罫線・余白で文節境界を自動検出（OpenCV.js）
-   → 各段落を切り抜き、Drive appDataFolder に個別保存（splitStatus: 'done'）
+   → 切り抜き座標を段落オブジェクトに記録（画像ファイルは生成しない）
+   → 表示時は Canvas API で元画像から該当領域を crop して描画
 
    ※ Step 1 とは独立。取り込み済みページを後からまとめて分割することも可能。
    ※ 自動検出結果を手動で調整（分割線の追加・削除）してから確定できる。
+   ※ 座標のみを保持するため、非破壊・後からの微調整が軽量。
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  Step 3  OCR  （任意・段落ごとに独立）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   段落オブジェクト単位で OCR を実行（ocrStatus: 'done'）
+   段落オブジェクト単位で OCR を実行
    エンジン選択：
      - Tesseract.js（オフライン・無料・ブラウザ内）
      - Google Cloud Vision API（高精度・要 API キー設定）
-   → OCR 結果を手動修正可能（ocrEditedText）
+   → OCR 結果を手動修正可能（editedText）
 
    ※ Step 2 とは独立。「この段落だけ OCR する」「後でまとめて OCR する」が可能。
    ※ テキスト化不要な段落は 'skipped' のまま画像として使用。
@@ -298,7 +369,8 @@ Step 1〜3 はそれぞれ独立しており、任意のタイミングで実行
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. [写真インポート]
-   Google Photos / Amazon Photos / Google Drive / ローカル から選択
+   Google Photos / Google Drive から選択
+   → PhotoObject を appDataFolder に保存
 
 2. [記事編集]
    段落オブジェクト + 写真オブジェクトをエディタ上で自由に配置
@@ -318,7 +390,8 @@ Step 1〜3 はそれぞれ独立しており、任意のタイミングで実行
 |------|------|
 | ホスティング (GitHub Pages) | **無料** |
 | 認証 (Google Identity Services) | **無料** |
-| ストレージ (Google Drive appDataFolder) | **無料**（ユーザーの Drive 容量を使用） |
+| 画像ストレージ (Google Drive 手帳画像フォルダ) | **無料**（ユーザーの Drive 容量を使用） |
+| メタデータ (Google Drive appDataFolder) | **無料**（ユーザーの Drive 容量を使用） |
 | 画像処理・OCR (OpenCV.js / Tesseract.js) | **無料**（ブラウザ内処理） |
 | 高精度 OCR (Google Cloud Vision API) | ユーザーが自分の GCP アカウントで負担（オプション） |
 
@@ -329,5 +402,6 @@ Step 1〜3 はそれぞれ独立しており、任意のタイミングで実行
 - 手書き文字スタイルの保持（画像優先表示 + テキストをメタとして添付）
 - 複数ページの自動連結
 - タグ・日付による記事の自動分類
+- Amazon Photos からの写真インポート対応
 - Obsidian / Notion へのエクスポート対応
 - モバイルアプリ版（React Native）
