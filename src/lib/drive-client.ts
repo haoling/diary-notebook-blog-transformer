@@ -275,7 +275,7 @@ export class DriveClient {
       await this.getFileInfo(fileId);
       return true;
     } catch (err: unknown) {
-      if (err instanceof Error && "statusCode" in err && (err as DriveError).statusCode === 404) {
+      if (err instanceof DriveNotFoundError) {
         return false;
       }
       throw err;
@@ -332,18 +332,11 @@ export class DriveClient {
     return res.json() as Promise<DriveFile>;
   }
 
-  /** ファイルのダウンロード URL を取得する（webContentLink）。 */
-  async getDownloadUrl(fileId: string): Promise<string> {
+  /** ファイルのダウンロード URL を取得する（webContentLink）。非バイナリ等で取得不可の場合は null を返す。 */
+  async getDownloadUrl(fileId: string): Promise<string | null> {
     const file = await this.apiFetch<{ webContentLink: string | null }>(
       `/files/${fileId}?fields=webContentLink`,
     );
-
-    if (!file.webContentLink) {
-      throw new DriveError(
-        "このファイルのダウンロード URL を取得できません。",
-        404,
-      );
-    }
 
     return file.webContentLink;
   }
