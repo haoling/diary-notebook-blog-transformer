@@ -36,11 +36,29 @@ export class DriveClient {
   // 内部ヘルパー
   // ------------------------------------------------------------------
 
-  private headers(): HeadersInit {
-    return {
+  /** デフォルトヘッダを生成し、init.headers で上書き可能にする。 */
+  private buildHeaders(init?: RequestInit): Headers {
+    const headers = new Headers({
       Authorization: `Bearer ${this.token}`,
       "Content-Type": "application/json",
-    };
+    });
+    if (init?.headers) {
+      const extra = new Headers(init.headers);
+      extra.forEach((value, key) => headers.set(key, value));
+    }
+    return headers;
+  }
+
+  /** レスポンスを検査し、エラーなら適切な DriveError をスローする。 */
+  private async assertOk(res: Response): Promise<void> {
+    if (res.ok) return;
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = undefined;
+    }
+    throw parseDriveError(res.status, body);
   }
 
   private async apiFetch<T>(
@@ -48,17 +66,9 @@ export class DriveClient {
     init?: RequestInit,
   ): Promise<T> {
     const url = `${DRIVE_API_BASE}${path}`;
-    const res = await fetch(url, { ...init, headers: this.headers() });
-
-    if (!res.ok) {
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        body = undefined;
-      }
-      throw parseDriveError(res.status, body);
-    }
+    const headers = this.buildHeaders(init);
+    const res = await fetch(url, { ...init, headers });
+    await this.assertOk(res);
 
     if (res.status === 204) return undefined as T;
     return res.json() as Promise<T>;
@@ -69,18 +79,19 @@ export class DriveClient {
     init?: RequestInit,
   ): Promise<Response> {
     const url = `${DRIVE_API_BASE}${path}`;
-    const res = await fetch(url, init);
+    const headers = this.buildHeaders(init);
+    const res = await fetch(url, { ...init, headers });
+    await this.assertOk(res);
+    return res;
+  }
 
-    if (!res.ok) {
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        body = undefined;
-      }
-      throw parseDriveError(res.status, body);
-    }
-
+  /** 指定した URL に Bearer 付きでリクエストを送り、レスポンスを返す。 */
+  private async authFetch(url: string, init?: RequestInit): Promise<Response> {
+    const res = await fetch(url, {
+      ...init,
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    await this.assertOk(res);
     return res;
   }
 
@@ -124,16 +135,7 @@ export class DriveClient {
       body,
     });
 
-    if (!res.ok) {
-      let errBody: unknown;
-      try {
-        errBody = await res.json();
-      } catch {
-        errBody = undefined;
-      }
-      throw parseDriveError(res.status, errBody);
-    }
-
+    await this.assertOk(res);
     return res.json() as Promise<DriveFile>;
   }
 
@@ -158,13 +160,26 @@ export class DriveClient {
     return { ...content, _fileId: file.id, _file: file };
   }
 
-  /** appDataFolder 内のファイル一覧を取得する。 */
+  /** appDataFolder 内のファイル一覧を全件取得する。 */
   async listAppDataFiles(): Promise<DriveFile[]> {
-    const result = await this.apiFetch<{
-      files: DriveFile[];
-    }>("/files?spaces=appDataFolder&fields=files(id,name,kind)&pageSize=100");
+    const files: DriveFile[] = [];
+    let nextPageToken: string | undefined;
 
-    return result.files ?? [];
+    do {
+      const pageQuery = nextPageToken
+        ? `&pageToken=${encodeURIComponent(nextPageToken)}`
+        : "";
+      const result = await this.apiFetch<{
+        files?: DriveFile[];
+        nextPageToken?: string;
+      }>(
+        `/files?spaces=appDataFolder&fields=files(id,name,kind),nextPageToken&pageSize=100${pageQuery}`,
+      );
+      files.push(...(result.files ?? []));
+      nextPageToken = result.nextPageToken;
+    } while (nextPageToken);
+
+    return files;
   }
 
   // ------------------------------------------------------------------
@@ -181,40 +196,14 @@ export class DriveClient {
   /** ファイルの内容を JSON として取得する。 */
   async getFileContent<T>(fileId: string): Promise<T> {
     const url = `${DRIVE_API_BASE}/files/${fileId}?alt=media`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-
-    if (!res.ok) {
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        body = undefined;
-      }
-      throw parseDriveError(res.status, body);
-    }
-
+    const res = await this.authFetch(url);
     return res.json() as Promise<T>;
   }
 
   /** ファイルの内容（バイナリ）を Blob として取得する。 */
   async getFileBlob(fileId: string): Promise<Blob> {
     const url = `${DRIVE_API_BASE}/files/${fileId}?alt=media`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-
-    if (!res.ok) {
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        body = undefined;
-      }
-      throw parseDriveError(res.status, body);
-    }
-
+    const res = await this.authFetch(url);
     return res.blob();
   }
 
@@ -249,16 +238,7 @@ export class DriveClient {
       body,
     });
 
-    if (!res.ok) {
-      let errBody: unknown;
-      try {
-        errBody = await res.json();
-      } catch {
-        errBody = undefined;
-      }
-      throw parseDriveError(res.status, errBody);
-    }
-
+    await this.assertOk(res);
     return res.json() as Promise<DriveFile>;
   }
 
@@ -267,14 +247,21 @@ export class DriveClient {
     fileId: string,
     patch: { name?: string; addParents?: string; removeParents?: string },
   ): Promise<DriveFile> {
+    const { name, addParents, removeParents } = patch;
     const params = new URLSearchParams();
     params.set("fields", "id,name,mimeType,parents,kind");
+
+    if (addParents) params.set("addParents", addParents);
+    if (removeParents) params.set("removeParents", removeParents);
+
+    const metadata: { name?: string } = {};
+    if (name !== undefined) metadata.name = name;
 
     return this.apiFetch<DriveFile>(
       `/files/${fileId}?${params.toString()}`,
       {
         method: "PATCH",
-        body: JSON.stringify(patch),
+        body: JSON.stringify(metadata),
       },
     );
   }
@@ -314,19 +301,7 @@ export class DriveClient {
     const metadataJson = JSON.stringify(metadata);
 
     const boundary = "drive_boundary_" + Date.now();
-    const body = [
-      `--${boundary}`,
-      "Content-Type: application/json; charset=UTF-8",
-      "",
-      metadataJson,
-      `--${boundary}`,
-      `Content-Type: ${blob.type || "application/octet-stream"}`,
-      "",
-      "",
-      `--${boundary}--`,
-    ].join("\r\n");
 
-    // 画像パートはバイナリで送るため Body の構築を分ける
     const encoder = new TextEncoder();
     const textParts: Uint8Array[] = [
       encoder.encode(`--${boundary}\r\n`),
@@ -355,16 +330,7 @@ export class DriveClient {
       body: fullBlob,
     });
 
-    if (!res.ok) {
-      let errBody: unknown;
-      try {
-        errBody = await res.json();
-      } catch {
-        errBody = undefined;
-      }
-      throw parseDriveError(res.status, errBody);
-    }
-
+    await this.assertOk(res);
     return res.json() as Promise<DriveFile>;
   }
 
@@ -375,8 +341,9 @@ export class DriveClient {
     );
 
     if (!file.webContentLink) {
-      throw new Error(
+      throw new DriveError(
         "このファイルのダウンロード URL を取得できません。",
+        404,
       );
     }
 
@@ -421,14 +388,27 @@ export class DriveClient {
     return this.createFolder(name);
   }
 
-  /** 指定フォルダ内のファイル一覧を取得する。 */
+  /** 指定フォルダ内のファイル一覧を全件取得する。 */
   async listFilesInFolder(folderId: string): Promise<DriveFile[]> {
     const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
-    const result = await this.apiFetch<{
-      files: DriveFile[];
-    }>(`/files?q=${query}&fields=files(id,name,mimeType,kind)&pageSize=100`);
+    const files: DriveFile[] = [];
+    let pageToken: string | undefined;
 
-    return result.files ?? [];
+    do {
+      const pageParam = pageToken
+        ? `&pageToken=${encodeURIComponent(pageToken)}`
+        : "";
+      const result = await this.apiFetch<{
+        files: DriveFile[];
+        nextPageToken?: string;
+      }>(
+        `/files?q=${query}&fields=nextPageToken,files(id,name,mimeType,kind)&pageSize=100${pageParam}`,
+      );
+      files.push(...(result.files ?? []));
+      pageToken = result.nextPageToken;
+    } while (pageToken);
+
+    return files;
   }
 }
 

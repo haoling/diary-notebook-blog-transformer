@@ -36,8 +36,11 @@ export class DriveNotFoundError extends DriveError {
 
 /** 429 / 403 (rateLimit) — API クォータ超過。 */
 export class DriveQuotaExceededError extends DriveError {
-  constructor(message = "API のリクエスト制限に達しました。しばらく時間をおいてください。") {
-    super(message, 429);
+  constructor(
+    message = "API のリクエスト制限に達しました。しばらく時間をおいてください。",
+    statusCode?: number,
+  ) {
+    super(message, statusCode ?? 429);
     this.name = "DriveQuotaExceededError";
   }
 }
@@ -52,7 +55,7 @@ export function parseDriveError(status: number, body: unknown): DriveError {
   if (status === 401) return new DriveAuthError(detail);
   if (status === 403) {
     if (typeof detail === "string" && detail.toLowerCase().includes("rate limit")) {
-      return new DriveQuotaExceededError(detail);
+      return new DriveQuotaExceededError(detail, status);
     }
     return new DrivePermissionError(detail);
   }
