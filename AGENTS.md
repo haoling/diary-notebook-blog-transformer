@@ -73,3 +73,14 @@ npm run lint      # eslint src/
 - `output: 'export'` — 静的エクスポート（GitHub Pages でホスティング）
 - `images.unoptimized: true` — Static Export では必須
 - `basePath` — `NEXT_PUBLIC_BASE_PATH` 環境変数で設定（GitHub Pages のサブディレクトリ対応）
+
+## プルリクエストのレビューフロー
+
+プルリク作成後は以下のサイクルで Copilot レビューを行い、すべての指摘が解消されるまで反復する。
+
+1. Copilot をレビュアーにアサインする
+2. 3 分おきにレビュー完了をポーリングする（レビューは一度にすべて投稿されるため、完了検出後の追加待ちは不要）
+3. レビュー完了後、各指摘に対して対応する（コード修正）または対応しない（Resolve / Dismiss）判断をする
+4. すべての指摘を resolve したら、再度 Copilot をアサインし、ステップ 2 に戻る
+5. 指摘がゼロになるか、すべての指摘が「対応しない」になったらサイクル終了
+6. サイクル完了後、プルリクの状態を "Ready for review" に変更し、人間の確認可能な状態にする
