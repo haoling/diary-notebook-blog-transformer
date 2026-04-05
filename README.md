@@ -176,7 +176,7 @@ appDataFolder/                            ← 非表示フォルダ (アプリ�
 | **PreprocessingModule** | 二値化・コントラスト調整・ノイズ除去 | Canvas API, OpenCV.js |
 | **OcrModule** | 手書き/印刷文字の OCR テキスト化（任意） | Tesseract.js / Google Cloud Vision API |
 | **ParagraphDetectionModule** | 水平罫線・余白・書式から文節を検出し、切り抜き座標を段落オブジェクトに記録 | OpenCV.js 輪郭検出 |
-| **DriveStorageModule** | 段落・写真オブジェクトを Google Drive 指定フォルダに保存・読み込み | Google Drive API v3 |
+| **DriveStorageModule** | 段落・写真オブジェクト（JSON）を appDataFolder に保存・読み込みし、可視フォルダでは元画像のみを扱う | Google Drive API v3 |
 
 ### フォトインポート
 
