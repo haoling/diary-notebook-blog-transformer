@@ -353,13 +353,16 @@ export class DriveClient {
 
   /** ルート（マイドライブ）にフォルダを作成する。 */
   async createFolder(name: string): Promise<DriveFile> {
-    return this.apiFetch<DriveFile>("/files", {
-      method: "POST",
-      body: JSON.stringify({
-        name,
-        mimeType: "application/vnd.google-apps.folder",
-      }),
-    });
+    return this.apiFetch<DriveFile>(
+      `/files?fields=${DriveClient.DEFAULT_FIELDS}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          mimeType: "application/vnd.google-apps.folder",
+        }),
+      },
+    );
   }
 
   /** マイドライブ内から名前でフォルダを検索する。 */
