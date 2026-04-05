@@ -163,7 +163,7 @@ export class DriveClient {
       `'appDataFolder' in parents and name = '${escapeDriveQueryValue(name)}' and trashed = false`,
     );
     const list = await this.apiFetch<{
-      files: DriveFile[];
+      files?: DriveFile[];
     }>(`/files?q=${query}&spaces=appDataFolder&fields=files(id,name,kind)`);
 
     if (!list.files || list.files.length === 0) {
@@ -368,7 +368,7 @@ export class DriveClient {
       `name = '${escapeDriveQueryValue(name)}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
     );
     const result = await this.apiFetch<{
-      files: DriveFile[];
+      files?: DriveFile[];
     }>(`/files?q=${query}&spaces=drive&fields=files(id,name,kind)&orderBy=name`);
 
     if (!result.files || result.files.length === 0) {
@@ -396,7 +396,7 @@ export class DriveClient {
         ? `&pageToken=${encodeURIComponent(pageToken)}`
         : "";
       const result = await this.apiFetch<{
-        files: DriveFile[];
+        files?: DriveFile[];
         nextPageToken?: string;
       }>(
         `/files?q=${query}&fields=nextPageToken,files(id,name,mimeType,kind)&pageSize=100${pageParam}`,
