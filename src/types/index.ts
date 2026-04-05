@@ -1,3 +1,4 @@
+/** スキャンセッション関連の型。 */
 export type {
   Point,
   CropRect,
@@ -8,21 +9,24 @@ export type {
   SplitResult,
   ScanPage,
   ScanSession,
-} from './scan'
+} from "./scan";
 
-export type { PhotoObject } from './photo'
+/** 写真オブジェクト関連の型。 */
+export type { PhotoObject } from "./photo";
 
+/** 記事・ブロック関連の型。 */
 export type {
   ParagraphBlock,
   PhotoBlock,
   ArticleBlock,
   Article,
-} from './article'
+} from "./article";
 
+/** ユーザー設定・インデックス関連の型。 */
 export type {
   Settings,
   IndexSessionEntry,
   IndexPhotoEntry,
   IndexArticleEntry,
   AppIndex,
-} from './settings'
+} from "./settings";
