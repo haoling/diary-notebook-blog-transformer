@@ -47,14 +47,32 @@ export class DriveQuotaExceededError extends DriveError {
 
 /** Drive API レスポンスから適切なエラーオブジェクトを生成する。 */
 export function parseDriveError(status: number, body: unknown): DriveError {
-  const detail =
+  const error =
     typeof body === "object" && body !== null && "error" in body
-      ? (body as { error: { message?: string } }).error?.message
+      ? (body as {
+          error?: {
+            message?: string;
+            errors?: Array<{ reason?: string }>;
+          };
+        }).error
       : undefined;
+
+  const detail = error?.message;
+  const reasons = Array.isArray(error?.errors)
+    ? error.errors
+        .map((entry) => entry?.reason)
+        .filter((reason): reason is string => typeof reason === "string")
+    : [];
+  const isQuotaExceededReason = reasons.some((reason) =>
+    ["rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"].includes(reason),
+  );
 
   if (status === 401) return new DriveAuthError(detail);
   if (status === 403) {
-    if (typeof detail === "string" && detail.toLowerCase().includes("rate limit")) {
+    if (
+      isQuotaExceededReason ||
+      (typeof detail === "string" && detail.toLowerCase().includes("rate limit"))
+    ) {
       return new DriveQuotaExceededError(detail, status);
     }
     return new DrivePermissionError(detail);
