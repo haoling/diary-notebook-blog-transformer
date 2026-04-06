@@ -71,7 +71,18 @@ export class SettingsManager {
     const data: Settings = { ...this.settings, version: this._version };
 
     if (this._fileId) {
-      await this.client.updateFileContent(this._fileId, data);
+      try {
+        await this.client.updateFileContent(this._fileId, data);
+      } catch (err) {
+        if (err instanceof DriveNotFoundError) {
+          console.warn("SettingsManager: ファイルが見つかりません。新規作成します。");
+          this._fileId = null;
+          const file = await this.client.createAppDataFile(SETTINGS_FILE_NAME, data);
+          this._fileId = file.id;
+          return;
+        }
+        throw err;
+      }
     } else {
       const file = await this.client.createAppDataFile(SETTINGS_FILE_NAME, data);
       this._fileId = file.id;

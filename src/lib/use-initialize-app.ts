@@ -41,7 +41,11 @@ export function useInitializeApp(): InitializeAppResult {
 
   const handleFolderSelected = useCallback(
     async (folder: { id: string; name: string }, sm: SettingsManager | null) => {
-      if (!sm) return;
+      if (!sm) {
+        setError(new Error("SettingsManager が初期化されていません。"));
+        setStatus("error");
+        return;
+      }
       try {
         await sm.update({
           notebookImageFolderId: folder.id,

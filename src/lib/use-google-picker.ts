@@ -89,6 +89,8 @@ export function useGooglePicker() {
     script.onload = initPicker;
     script.onerror = () => {
       console.error("Google Picker API の読み込みに失敗しました。");
+      scriptLoading.current = false;
+      script.remove();
       if (mounted.current) setLoading(false);
     };
     document.head.appendChild(script);

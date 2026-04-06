@@ -82,7 +82,18 @@ export class IndexManager {
     const data = { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles], version: this._version };
 
     if (this._fileId) {
-      await this.client.updateFileContent(this._fileId, data);
+      try {
+        await this.client.updateFileContent(this._fileId, data);
+      } catch (err) {
+        if (err instanceof DriveNotFoundError) {
+          console.warn("IndexManager: ファイルが見つかりません。新規作成します。");
+          this._fileId = null;
+          const file = await this.client.createAppDataFile(INDEX_FILE_NAME, data);
+          this._fileId = file.id;
+          return;
+        }
+        throw err;
+      }
     } else {
       const file = await this.client.createAppDataFile(INDEX_FILE_NAME, data);
       this._fileId = file.id;
