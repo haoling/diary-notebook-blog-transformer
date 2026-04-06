@@ -48,7 +48,7 @@ export class IndexManager {
         const newIndex = { ...DEFAULT_INDEX };
         const file = await this.client.createAppDataFile(
           INDEX_FILE_NAME,
-          newIndex,
+          { ...newIndex, version: 1 },
         );
         this._fileId = file.id;
         this.index = newIndex;
@@ -98,15 +98,24 @@ export class IndexManager {
   }
 
   getSessions(): IndexSessionEntry[] {
-    return [...(this.index?.sessions ?? [])];
+    if (!this.index) {
+      throw new Error("IndexManager: load() を先に呼び出してください。");
+    }
+    return [...this.index.sessions];
   }
 
   getPhotos(): IndexPhotoEntry[] {
-    return [...(this.index?.photos ?? [])];
+    if (!this.index) {
+      throw new Error("IndexManager: load() を先に呼び出してください。");
+    }
+    return [...this.index.photos];
   }
 
   getArticles(): IndexArticleEntry[] {
-    return [...(this.index?.articles ?? [])];
+    if (!this.index) {
+      throw new Error("IndexManager: load() を先に呼び出してください。");
+    }
+    return [...this.index.articles];
   }
 
   /** セッションエントリを追加する。 */

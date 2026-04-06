@@ -123,7 +123,7 @@ export class SettingsManager {
   }
 
   /** 複数の設定項目を一度に更新して永続化する。 */
-  async update(partial: Partial<Settings>): Promise<void> {
+  async update(partial: Partial<Omit<Settings, "version">>): Promise<void> {
     if (!this.settings) {
       throw new Error("SettingsManager: load() を先に呼び出してください。");
     }
