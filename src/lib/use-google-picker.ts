@@ -54,11 +54,16 @@ export function useGooglePicker() {
   const [loading, setLoading] = useState(true);
   const pickerReady = useRef(false);
   const scriptLoading = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    return () => { mounted.current = false; };
+  }, []);
 
   const initPicker = useCallback(() => {
     window.gapi.load("picker", () => {
       pickerReady.current = true;
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     });
   }, []);
 
@@ -84,7 +89,7 @@ export function useGooglePicker() {
     script.onload = initPicker;
     script.onerror = () => {
       console.error("Google Picker API の読み込みに失敗しました。");
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     };
     document.head.appendChild(script);
   }, [initPicker]);

@@ -20,7 +20,7 @@ const DEFAULT_INDEX: AppIndex = {
  *
  * - load() でファイルを読み込み（不在時はデフォルト値で作成）、インメモリにキャッシュ
  * - 変異メソッドはインメモリ状態を変更し即座に永続化
- * - version カウンターによる上書き検知（last-write-wins: 書き込み前に最新 version を取得し差分をログ出力）
+ * - version カウンターによる上書き検知（last-write-wins: 書き込み前に最新 version を取得し、version の差を警告して上書き）
  */
 export class IndexManager {
   private readonly client: DriveClient;

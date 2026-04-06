@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { createDriveClient } from "@/lib/drive-client";
-import { DriveNotFoundError } from "@/lib/drive-errors";
 import { SettingsManager } from "@/lib/settings-manager";
 import { IndexManager } from "@/lib/index-manager";
 import type { Settings, AppIndex } from "@/types/settings";
@@ -112,10 +111,6 @@ export function useInitializeApp(): InitializeAppResult {
           setStatus("needsFolderSelection");
         }
       } catch (err) {
-        if (err instanceof DriveNotFoundError) {
-          if (!cancelled) setStatus("needsFolderSelection");
-          return;
-        }
         const message =
           err instanceof Error ? err.message : "初期化に失敗しました。";
         if (!cancelled) {
