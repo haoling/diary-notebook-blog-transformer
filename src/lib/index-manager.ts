@@ -21,7 +21,7 @@ const DEFAULT_INDEX: AppIndex = {
  *
  * - load() でファイルを読み込み（不在時はデフォルト値で作成）、インメモリにキャッシュ
  * - 変異メソッドはインメモリ状態を変更し即座に永続化
- * - version カウンターによる並行書き込み検知（last-write-wins）
+ * - version カウンターによる上書き検知（last-write-wins: 書き込み前に最新 version を取得し差分をログ出力）
  */
 export class IndexManager {
   private readonly client: DriveClient;
@@ -46,12 +46,18 @@ export class IndexManager {
       return this.index;
     } catch (err) {
       if (err instanceof DriveNotFoundError) {
+        const newDefault: AppIndex = {
+          sessions: [],
+          photos: [],
+          articles: [],
+          version: 1,
+        };
         const file = await this.client.createAppDataFile(
           INDEX_FILE_NAME,
-          DEFAULT_INDEX,
+          newDefault,
         );
         this._fileId = file.id;
-        this.index = DEFAULT_INDEX;
+        this.index = newDefault;
         this._version = 1;
         return this.index;
       }
@@ -64,6 +70,20 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
+
+    if (this._fileId) {
+      const remote = await this.client.getAppDataFileByName<AppIndex>(
+        INDEX_FILE_NAME,
+      );
+      const remoteVersion = remote.version ?? 0;
+      if (remoteVersion > this._version) {
+        console.warn(
+          `IndexManager: 並行書き込みを検知 (remote version=${remoteVersion}, local version=${this._version})。last-write-wins で上書きします。`,
+        );
+        this._version = remoteVersion;
+      }
+    }
+
     this._version++;
     const data: AppIndex = { ...this.index, version: this._version };
 
@@ -80,19 +100,19 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    return this.index;
+    return { ...this.index };
   }
 
   getSessions(): IndexSessionEntry[] {
-    return this.index?.sessions ?? [];
+    return [...(this.index?.sessions ?? [])];
   }
 
   getPhotos(): IndexPhotoEntry[] {
-    return this.index?.photos ?? [];
+    return [...(this.index?.photos ?? [])];
   }
 
   getArticles(): IndexArticleEntry[] {
-    return this.index?.articles ?? [];
+    return [...(this.index?.articles ?? [])];
   }
 
   /** セッションエントリを追加する。 */

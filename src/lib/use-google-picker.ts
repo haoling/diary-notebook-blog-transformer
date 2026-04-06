@@ -70,7 +70,11 @@ export function useGooglePicker() {
       `script[src="${PICKER_SCRIPT_SRC}"]`,
     );
     if (existingScript) {
-      initPicker();
+      if (window.gapi) {
+        initPicker();
+      } else {
+        existingScript.addEventListener("load", initPicker, { once: true });
+      }
       return;
     }
 

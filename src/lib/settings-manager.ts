@@ -9,7 +9,7 @@ const SETTINGS_FILE_NAME = "settings.json";
  *
  * - load() でファイルを読み込み（不在時はデフォルト値で作成）、インメモリにキャッシュ
  * - 変異メソッドはインメモリ状態を変更し即座に永続化
- * - version カウンターによる並行書き込み検知（last-write-wins）
+ * - version カウンターによる上書き検知（last-write-wins: 書き込み前に最新 version を取得し差分をログ出力）
  */
 export class SettingsManager {
   private readonly client: DriveClient;
@@ -53,6 +53,20 @@ export class SettingsManager {
     if (!this.settings) {
       throw new Error("SettingsManager: load() を先に呼び出してください。");
     }
+
+    if (this._fileId) {
+      const remote = await this.client.getAppDataFileByName<Settings>(
+        SETTINGS_FILE_NAME,
+      );
+      const remoteVersion = remote.version ?? 0;
+      if (remoteVersion > this._version) {
+        console.warn(
+          `SettingsManager: 並行書き込みを検知 (remote version=${remoteVersion}, local version=${this._version})。last-write-wins で上書きします。`,
+        );
+        this._version = remoteVersion;
+      }
+    }
+
     this._version++;
     const data: Settings = { ...this.settings, version: this._version };
 
@@ -69,7 +83,7 @@ export class SettingsManager {
     if (!this.settings) {
       throw new Error("SettingsManager: load() を先に呼び出してください。");
     }
-    return this.settings;
+    return { ...this.settings };
   }
 
   getVisionApiKey(): string | undefined {

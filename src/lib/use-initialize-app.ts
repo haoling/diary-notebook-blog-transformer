@@ -62,6 +62,12 @@ export function useInitializeApp(): InitializeAppResult {
 
   useEffect(() => {
     if (!isAuthenticated || !accessToken) {
+      setStatus("loading");
+      setSettings(null);
+      setIndex(null);
+      setError(null);
+      setSettingsManager(null);
+      setIndexManager(null);
       return;
     }
 
