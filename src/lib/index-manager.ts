@@ -13,7 +13,6 @@ const DEFAULT_INDEX: AppIndex = {
   sessions: [],
   photos: [],
   articles: [],
-  version: 1,
 };
 
 /**
@@ -46,18 +45,13 @@ export class IndexManager {
       return this.index;
     } catch (err) {
       if (err instanceof DriveNotFoundError) {
-        const newDefault: AppIndex = {
-          sessions: [],
-          photos: [],
-          articles: [],
-          version: 1,
-        };
+        const newIndex = { ...DEFAULT_INDEX };
         const file = await this.client.createAppDataFile(
           INDEX_FILE_NAME,
-          newDefault,
+          newIndex,
         );
         this._fileId = file.id;
-        this.index = newDefault;
+        this.index = newIndex;
         this._version = 1;
         return this.index;
       }
@@ -72,8 +66,8 @@ export class IndexManager {
     }
 
     if (this._fileId) {
-      const remote = await this.client.getAppDataFileByName<AppIndex>(
-        INDEX_FILE_NAME,
+      const remote = await this.client.getFileContent<{ version?: number }>(
+        this._fileId,
       );
       const remoteVersion = remote.version ?? 0;
       if (remoteVersion > this._version) {
@@ -85,7 +79,7 @@ export class IndexManager {
     }
 
     this._version++;
-    const data: AppIndex = { ...this.index, version: this._version };
+    const data = { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles], version: this._version };
 
     if (this._fileId) {
       await this.client.updateFileContent(this._fileId, data);
@@ -100,7 +94,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    return { ...this.index };
+    return { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles] };
   }
 
   getSessions(): IndexSessionEntry[] {

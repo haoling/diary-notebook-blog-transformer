@@ -34,10 +34,10 @@ export class SettingsManager {
       return this.settings;
     } catch (err) {
       if (err instanceof DriveNotFoundError) {
-        const defaults: Settings = { version: 1 };
+        const defaults: Settings = {};
         const file = await this.client.createAppDataFile(
           SETTINGS_FILE_NAME,
-          defaults,
+          { ...defaults, version: 1 },
         );
         this._fileId = file.id;
         this.settings = defaults;
@@ -55,8 +55,8 @@ export class SettingsManager {
     }
 
     if (this._fileId) {
-      const remote = await this.client.getAppDataFileByName<Settings>(
-        SETTINGS_FILE_NAME,
+      const remote = await this.client.getFileContent<{ version?: number }>(
+        this._fileId,
       );
       const remoteVersion = remote.version ?? 0;
       if (remoteVersion > this._version) {
