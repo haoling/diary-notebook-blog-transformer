@@ -79,6 +79,10 @@ npm run lint      # eslint src/
 プルリク作成後は以下のサイクルで Copilot レビューを行い、すべての指摘が解消されるまで反復する。
 
 1. Copilot をレビュアーにアサインする
+   ```bash
+   gh api repos/<owner>/<repo>/pulls/<pull_request_id>/requested_reviewers \
+     -X POST -f reviewers[]=copilot-pull-request-reviewer[bot]
+   ```
 2. 3 分おきにレビュー完了をポーリングする（レビューは一度にすべて投稿されるため、完了検出後の追加待ちは不要）
 3. レビュー完了後、各指摘に対して対応する（コード修正）または対応しない（Resolve / Dismiss）判断をする
 4. すべての指摘を resolve したら、再度 Copilot をアサインし、ステップ 2 に戻る
