@@ -74,15 +74,26 @@ export class IndexManager {
     }
 
     if (this._fileId) {
-      const remote = await this.client.getFileContent<{ version?: number }>(
-        this._fileId,
-      );
-      const remoteVersion = remote.version ?? 0;
-      if (remoteVersion > this._version) {
-        console.warn(
-          `IndexManager: 並行書き込みを検知 (remote version=${remoteVersion}, local version=${this._version})。last-write-wins で上書きします。`,
+      try {
+        const remote = await this.client.getFileContent<{ version?: number }>(
+          this._fileId,
         );
-        this._version = remoteVersion;
+        const remoteVersion = remote.version ?? 0;
+        if (remoteVersion > this._version) {
+          console.warn(
+            `IndexManager: 並行書き込みを検知 (remote version=${remoteVersion}, local version=${this._version})。last-write-wins で上書きします。`,
+          );
+          this._version = remoteVersion;
+        }
+      } catch (err) {
+        if (err instanceof DriveNotFoundError) {
+          console.warn(
+            "IndexManager: version 取得前にファイルが見つかりません。新規作成にフォールバックします。",
+          );
+          this._fileId = null;
+        } else {
+          throw err;
+        }
       }
     }
 

@@ -21,7 +21,7 @@ export const FolderPickerDialog = ({
   onSelect,
   onCancel,
 }: FolderPickerDialogProps) => {
-  const { loading, openFolderPicker } = useGooglePicker();
+  const { loading, error, retry, openFolderPicker } = useGooglePicker();
   const [selectedFolder, setSelectedFolder] = useState<FolderInfo | null>(null);
   const [picking, setPicking] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -113,14 +113,29 @@ export const FolderPickerDialog = ({
             キャンセル
           </button>
           {!selectedFolder ? (
-            <button
-              type="button"
-              onClick={handleOpenPicker}
-              disabled={loading || picking}
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? "読み込み中…" : picking ? "選択中…" : "フォルダを選択する"}
-            </button>
+            error ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-red-600">
+                  読み込みに失敗しました。
+                </span>
+                <button
+                  type="button"
+                  onClick={retry}
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  再試行
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleOpenPicker}
+                disabled={loading || picking}
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? "読み込み中…" : picking ? "選択中…" : "フォルダを選択する"}
+              </button>
+            )
           ) : (
             <button
               type="button"
