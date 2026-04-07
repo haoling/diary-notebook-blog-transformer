@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { createDriveClient } from "@/lib/drive-client";
 import type { DriveFile } from "@/lib/drive-client";
+import { useGooglePicker } from "@/lib/use-google-picker";
 
 type FileEntry = {
   file: DriveFile;
@@ -25,6 +26,11 @@ export default function DebugPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // フォルダピッカー
+  const { loading: pickerLoading, error: pickerError, retry: pickerRetry, openFolderPicker } = useGooglePicker();
+  const [picking, setPicking] = useState(false);
+  const [pickedFolder, setPickedFolder] = useState<{ id: string; name: string } | null>(null);
 
   const addToast = useCallback((message: string, type: Toast["type"]) => {
     setToasts((prev) => [...prev, { message, type }]);
@@ -155,6 +161,23 @@ export default function DebugPage() {
     setInitialized(false);
     loadFiles();
   }, [loadFiles]);
+
+  const handleOpenPicker = useCallback(async () => {
+    if (!accessToken) return;
+    setPicking(true);
+    setPickedFolder(null);
+    try {
+      const result = await openFolderPicker(accessToken);
+      if (result) {
+        setPickedFolder(result);
+        addToast(`フォルダを選択: ${result.name} (${result.id})`, "success");
+      } else {
+        addToast("フォルダ選択がキャンセルされました", "error");
+      }
+    } finally {
+      setPicking(false);
+    }
+  }, [accessToken, openFolderPicker, addToast]);
 
   if (!isAuthenticated) {
     return (
@@ -336,6 +359,49 @@ export default function DebugPage() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* フォルダピッカーテスト */}
+        <div className="mt-8 bg-white rounded-2xl shadow-sm border border-blue-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-blue-100 bg-blue-50">
+            <h2 className="font-semibold text-blue-700">
+              📂 フォルダピッカーテスト
+            </h2>
+          </div>
+          <div className="p-4">
+            <p className="text-sm text-slate-600 mb-4">
+              Google Picker API を使ってフォルダを選択するテストです。
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              {pickerError ? (
+                <>
+                  <span className="text-sm text-red-600">
+                    Picker API 読み込み失敗: {pickerError.message}
+                  </span>
+                  <button
+                    onClick={pickerRetry}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
+                  >
+                    再試行
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={handleOpenPicker}
+                  disabled={pickerLoading || picking}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm disabled:opacity-50"
+                >
+                  {pickerLoading ? "API 読み込み中…" : picking ? "選択中…" : "フォルダを選択する"}
+                </button>
+              )}
+              {pickedFolder && (
+                <div className="text-sm text-slate-700 bg-slate-100 rounded-lg px-3 py-2">
+                  <span className="font-medium">{pickedFolder.name}</span>
+                  <span className="text-slate-400 ml-2">ID: {pickedFolder.id}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
