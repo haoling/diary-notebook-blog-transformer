@@ -113,7 +113,7 @@ export function useGooglePicker() {
   const openFolderPicker = useCallback(
     (accessToken: string): Promise<{ id: string; name: string } | null> => {
       return new Promise((resolve) => {
-        if (!pickerReady.current || !window.google) {
+        if (!pickerReady.current || !window.google?.picker) {
           console.warn("Google Picker API が読み込まれていません。");
           resolve(null);
           return;
