@@ -149,8 +149,9 @@ export function useGooglePicker() {
                 resolve({ id: docs[0].id, name: docs[0].name });
                 return;
               }
+            } else if (action === picker.Action.CANCEL) {
+              resolve(null);
             }
-            resolve(null);
           })
           .build();
 
