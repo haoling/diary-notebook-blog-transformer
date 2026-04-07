@@ -131,6 +131,7 @@ export class IndexManager {
       sessions: this.cloneEntries(idx.sessions),
       photos: this.cloneEntries(idx.photos),
       articles: this.cloneEntries(idx.articles),
+      version: this._version,
     };
   }
 

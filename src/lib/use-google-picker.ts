@@ -64,7 +64,14 @@ export function useGooglePicker() {
   }, []);
 
   const initPicker = useCallback(() => {
-    window.gapi?.load("picker", () => {
+    if (!window.gapi) {
+      if (mounted.current) {
+        setLoading(false);
+        setError(new Error("Google API ライブラリの読み込みに失敗しました。"));
+      }
+      return;
+    }
+    window.gapi.load("picker", () => {
       pickerReady.current = true;
       if (mounted.current) {
         setLoading(false);
@@ -120,7 +127,7 @@ export function useGooglePicker() {
         }
 
         const { picker } = window.google;
-        const builder = new picker.PickerBuilder()
+        const pickerInstance = new picker.PickerBuilder()
           .addView(picker.ViewId.FOLDERS)
           .setOAuthToken(accessToken)
           .setCallback((data: Record<string, unknown>) => {
@@ -138,7 +145,7 @@ export function useGooglePicker() {
           })
           .build();
 
-        builder.setVisible(true);
+        pickerInstance.setVisible(true);
       });
     },
     [],
