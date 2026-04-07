@@ -3,6 +3,8 @@ export type Settings = {
   visionApiKey?: string;
   notebookImageFolderId?: string;
   notebookImageFolderName?: string;
+  /** 永続化ごとにインクリメントされるバージョン番号。 */
+  version?: number;
 };
 
 /** index.json 内のセッションエントリ。 */
@@ -33,4 +35,6 @@ export type AppIndex = {
   sessions: IndexSessionEntry[];
   photos: IndexPhotoEntry[];
   articles: IndexArticleEntry[];
+  /** 永続化ごとにインクリメントされるバージョン番号。 */
+  version?: number;
 };
