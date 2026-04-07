@@ -18,7 +18,7 @@ declare global {
         };
         Response: {
           ACTION: string;
-          DOCUMENTS: string;
+          DOCS: string;
         };
         Document: {
           id: string;
@@ -140,12 +140,11 @@ export function useGooglePicker() {
           .addView(view)
           .setOAuthToken(accessToken)
           .setCallback((data: Record<string, unknown>) => {
-            console.log("[Picker] callback data:", JSON.stringify(data));
             const action = data[picker.Response.ACTION];
             if (action === picker.Action.PICKED) {
-              const docs = data[
-                picker.Response.DOCUMENTS
-              ] as Array<{ id: string; name: string }> | undefined;
+              const docs = data[picker.Response.DOCS] as
+                | Array<{ id: string; name: string }>
+                | undefined;
               if (docs && docs.length > 0) {
                 resolve({ id: docs[0].id, name: docs[0].name });
                 return;
