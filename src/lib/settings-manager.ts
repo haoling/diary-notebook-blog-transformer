@@ -58,8 +58,9 @@ export class SettingsManager {
    * ファイルが消えていた場合のみ新規作成にフォールバックする。
    */
   private persist(): Promise<void> {
-    this.persistChain = this.persistChain.then(() => this.doPersist());
-    return this.persistChain;
+    const p = this.persistChain.then(() => this.doPersist());
+    this.persistChain = p.catch(() => {});
+    return p;
   }
 
   private async doPersist(): Promise<void> {
