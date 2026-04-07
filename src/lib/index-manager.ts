@@ -27,6 +27,7 @@ export class IndexManager {
   private index: AppIndex | null = null;
   private _fileId: string | null = null;
   private _version: number = 0;
+  private persistChain: Promise<void> = Promise.resolve();
 
   constructor(client: DriveClient) {
     this.client = client;
@@ -75,7 +76,12 @@ export class IndexManager {
    * persist() ではインメモリ上の version をそのまま進めて書き込む。
    * ファイルが消えていた場合のみ新規作成にフォールバックする。
    */
-  private async persist(): Promise<void> {
+  private persist(): Promise<void> {
+    this.persistChain = this.persistChain.then(() => this.doPersist());
+    return this.persistChain;
+  }
+
+  private async doPersist(): Promise<void> {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
