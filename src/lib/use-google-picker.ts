@@ -7,6 +7,7 @@ declare global {
   interface Window {
     google?: {
       picker: {
+        DocsView: new (viewType: string) => DocsViewInstance;
         PickerBuilder: new () => PickerBuilder;
         ViewId: {
           FOLDERS: number;
@@ -29,6 +30,10 @@ declare global {
       load: (api: string, callback: () => void) => void;
     };
   }
+}
+
+interface DocsViewInstance {
+  setParent: (id: string) => DocsViewInstance;
 }
 
 /** PickerBuilder の最小インターフェース。 */
@@ -128,8 +133,9 @@ export function useGooglePicker() {
         }
 
         const { picker } = window.google;
+        const view = new picker.DocsView("folders").setParent("root");
         const pickerInstance = new picker.PickerBuilder()
-          .addView(picker.ViewId.FOLDERS)
+          .addView(view)
           .setOAuthToken(accessToken)
           .setCallback((data: Record<string, unknown>) => {
             const action = data[picker.Response.ACTION];
