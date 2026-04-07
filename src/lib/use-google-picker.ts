@@ -140,6 +140,7 @@ export function useGooglePicker() {
           .addView(view)
           .setOAuthToken(accessToken)
           .setCallback((data: Record<string, unknown>) => {
+            console.log("[Picker] callback data:", JSON.stringify(data));
             const action = data[picker.Response.ACTION];
             if (action === picker.Action.PICKED) {
               const docs = data[
