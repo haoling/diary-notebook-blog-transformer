@@ -9,7 +9,7 @@ const SETTINGS_FILE_NAME = "settings.json";
  *
  * - load() でファイルを読み込み（不在時はデフォルト値で作成）、インメモリにキャッシュ
  * - 変異メソッドはインメモリ状態を変更し即座に永続化
- * - version カウンターによる上書き検知（last-write-wins: 書き込み前に最新 version を取得し、version の差を警告して上書き）
+ * - version カウンターをインクリメントして書き込み（ファイル消失時は新規作成にフォールバック）
  */
 export class SettingsManager {
   private readonly client: DriveClient;

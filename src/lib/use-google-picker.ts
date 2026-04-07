@@ -9,15 +9,15 @@ declare global {
       picker: {
         PickerBuilder: new () => PickerBuilder;
         ViewId: {
-          FOLDERS: 1;
+          FOLDERS: number;
         };
         Action: {
-          PICKED: "google.picker.Action.PICKED";
-          CANCEL: "google.picker.Action.CANCEL";
+          PICKED: string;
+          CANCEL: string;
         };
         Response: {
-          ACTION: "google.picker.Response.ACTION";
-          DOCUMENTS: "google.picker.Response.DOCUMENTS";
+          ACTION: string;
+          DOCUMENTS: string;
         };
         Document: {
           id: string;
@@ -83,8 +83,9 @@ export function useGooglePicker() {
     }
 
     if (existingScript) {
-      existingScript.addEventListener("load", initPicker, { once: true });
-      return;
+      const handleScriptLoad = () => { initPicker(); };
+      existingScript.addEventListener("load", handleScriptLoad, { once: true });
+      return () => { existingScript.removeEventListener("load", handleScriptLoad); };
     }
 
     const script = document.createElement("script");
