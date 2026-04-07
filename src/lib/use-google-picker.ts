@@ -9,21 +9,6 @@ declare global {
       picker: {
         DocsView: new (viewType: string) => DocsViewInstance;
         PickerBuilder: new () => PickerBuilder;
-        ViewId: {
-          FOLDERS: number;
-        };
-        Action: {
-          PICKED: string;
-          CANCEL: string;
-        };
-        Response: {
-          ACTION: string;
-          DOCS: string;
-        };
-        Document: {
-          id: string;
-          name: string;
-        };
       };
     };
     gapi?: {
@@ -140,7 +125,6 @@ export function useGooglePicker() {
           .addView(view)
           .setOAuthToken(accessToken)
           .setCallback((data: Record<string, unknown>) => {
-            console.log("[Picker] action:", data["action"], "keys:", Object.keys(data));
             const action = data["action"];
             if (action === "picked") {
               const docs = data["docs"] as
