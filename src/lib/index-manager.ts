@@ -46,7 +46,7 @@ export class IndexManager {
         articles: Array.isArray(rest.articles) ? [...rest.articles] : [...DEFAULT_INDEX.articles],
       };
       this._version = version ?? 0;
-      return this.index;
+      return { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles] };
     } catch (err) {
       if (err instanceof DriveNotFoundError) {
         const newIndex: AppIndex = {
@@ -61,40 +61,23 @@ export class IndexManager {
         this._fileId = file.id;
         this.index = newIndex;
         this._version = 1;
-        return this.index;
+        return { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles] };
       }
       throw err;
     }
   }
 
-  /** インメモリ状態を appDataFolder に永続化する。version をインクリメントする。 */
+  /**
+   * インメモリ状態を appDataFolder に永続化する。version をインクリメントする。
+   *
+   * version 確認のためにファイル全体を事前取得すると、更新のたびに
+   * 全文ダウンロード→全文アップロードが発生するため、
+   * persist() ではインメモリ上の version をそのまま進めて書き込む。
+   * ファイルが消えていた場合のみ新規作成にフォールバックする。
+   */
   private async persist(): Promise<void> {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
-    }
-
-    if (this._fileId) {
-      try {
-        const remote = await this.client.getFileContent<{ version?: number }>(
-          this._fileId,
-        );
-        const remoteVersion = remote.version ?? 0;
-        if (remoteVersion > this._version) {
-          console.warn(
-            `IndexManager: 並行書き込みを検知 (remote version=${remoteVersion}, local version=${this._version})。last-write-wins で上書きします。`,
-          );
-          this._version = remoteVersion;
-        }
-      } catch (err) {
-        if (err instanceof DriveNotFoundError) {
-          console.warn(
-            "IndexManager: version 取得前にファイルが見つかりません。新規作成にフォールバックします。",
-          );
-          this._fileId = null;
-        } else {
-          throw err;
-        }
-      }
     }
 
     const nextVersion = this._version + 1;

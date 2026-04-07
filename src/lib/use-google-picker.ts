@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 /** Google Picker API の型宣言。 */
 declare global {
   interface Window {
-    google: {
+    google?: {
       picker: {
         PickerBuilder: new () => PickerBuilder;
         ViewId: {
@@ -25,7 +25,7 @@ declare global {
         };
       };
     };
-    gapi: {
+    gapi?: {
       load: (api: string, callback: () => void) => void;
     };
   }
@@ -64,7 +64,7 @@ export function useGooglePicker() {
   }, []);
 
   const initPicker = useCallback(() => {
-    window.gapi.load("picker", () => {
+    window.gapi?.load("picker", () => {
       pickerReady.current = true;
       if (mounted.current) {
         setLoading(false);
@@ -112,20 +112,21 @@ export function useGooglePicker() {
   const openFolderPicker = useCallback(
     (accessToken: string): Promise<{ id: string; name: string } | null> => {
       return new Promise((resolve) => {
-        if (!pickerReady.current) {
+        if (!pickerReady.current || !window.google) {
           console.warn("Google Picker API が読み込まれていません。");
           resolve(null);
           return;
         }
 
-        const picker = new window.google.picker.PickerBuilder()
-          .addView(window.google.picker.ViewId.FOLDERS)
+        const { picker } = window.google;
+        const builder = new picker.PickerBuilder()
+          .addView(picker.ViewId.FOLDERS)
           .setOAuthToken(accessToken)
           .setCallback((data: Record<string, unknown>) => {
-            const action = data[window.google.picker.Response.ACTION];
-            if (action === window.google.picker.Action.PICKED) {
+            const action = data[picker.Response.ACTION];
+            if (action === picker.Action.PICKED) {
               const docs = data[
-                window.google.picker.Response.DOCUMENTS
+                picker.Response.DOCUMENTS
               ] as Array<{ id: string; name: string }> | undefined;
               if (docs && docs.length > 0) {
                 resolve({ id: docs[0].id, name: docs[0].name });
@@ -136,7 +137,7 @@ export function useGooglePicker() {
           })
           .build();
 
-        picker.setVisible(true);
+        builder.setVisible(true);
       });
     },
     [],
