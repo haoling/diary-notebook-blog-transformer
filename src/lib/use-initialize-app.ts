@@ -55,9 +55,11 @@ export function useInitializeApp(): InitializeAppResult {
         setError(null);
         setStatus("ready");
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "フォルダ設定の保存に失敗しました。";
-        setError(new Error(message));
+        setError(
+          err instanceof Error
+            ? err
+            : new Error("フォルダ設定の保存に失敗しました。"),
+        );
         setStatus("error");
       }
     },
@@ -116,10 +118,12 @@ export function useInitializeApp(): InitializeAppResult {
           setStatus("needsFolderSelection");
         }
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "初期化に失敗しました。";
         if (!cancelled) {
-          setError(new Error(message));
+          setError(
+            err instanceof Error
+              ? err
+              : new Error("初期化に失敗しました。"),
+          );
           setStatus("error");
         }
       }

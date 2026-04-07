@@ -81,7 +81,13 @@ export class IndexManager {
     }
 
     const nextVersion = this._version + 1;
-    const data = { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles], version: nextVersion };
+    const data = {
+      ...this.index,
+      sessions: this.cloneEntries(this.index.sessions),
+      photos: this.cloneEntries(this.index.photos),
+      articles: this.cloneEntries(this.index.articles),
+      version: nextVersion,
+    };
 
     if (this._fileId) {
       try {
@@ -152,7 +158,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.sessions.push(entry);
+    this.index.sessions.push(structuredClone(entry));
     await this.persist();
   }
 
@@ -170,7 +176,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.photos.push(entry);
+    this.index.photos.push(structuredClone(entry));
     await this.persist();
   }
 
@@ -188,7 +194,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.articles.push(entry);
+    this.index.articles.push(structuredClone(entry));
     await this.persist();
   }
 

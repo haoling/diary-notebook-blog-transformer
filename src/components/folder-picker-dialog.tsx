@@ -26,9 +26,11 @@ export const FolderPickerDialog = ({
   const [picking, setPicking] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const mounted = useRef(true);
 
   useEffect(() => {
     closeButtonRef.current?.focus();
+    return () => { mounted.current = false; };
   }, []);
 
   const handleKeyDown = useCallback(
@@ -64,11 +66,11 @@ export const FolderPickerDialog = ({
     setPicking(true);
     try {
       const result = await openFolderPicker(accessToken);
-      if (result) {
+      if (mounted.current && result) {
         setSelectedFolder(result);
       }
     } finally {
-      setPicking(false);
+      if (mounted.current) setPicking(false);
     }
   };
 
