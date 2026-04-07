@@ -119,7 +119,10 @@ export class IndexManager {
   }
 
   private cloneEntries<T>(entries: T[]): T[] {
-    return structuredClone(entries);
+    if (typeof structuredClone === "function") {
+      return structuredClone(entries);
+    }
+    return entries.map((e) => ({ ...e }));
   }
 
   private cloneIndex(): AppIndex {
@@ -165,7 +168,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.sessions.push(structuredClone(entry));
+    this.index.sessions.push(...this.cloneEntries([entry]));
     await this.persist();
   }
 
@@ -183,7 +186,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.photos.push(structuredClone(entry));
+    this.index.photos.push(...this.cloneEntries([entry]));
     await this.persist();
   }
 
@@ -201,7 +204,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.articles.push(structuredClone(entry));
+    this.index.articles.push(...this.cloneEntries([entry]));
     await this.persist();
   }
 
