@@ -48,12 +48,15 @@ const PICKER_SCRIPT_SRC = "https://apis.google.com/js/api.js";
  * Google Picker API を動的ロードし、フォルダ選択ダイアログを表示する React フック。
  *
  * @returns loading — スクリプトロード中かどうか
+ * @returns error — ロード失敗時のエラー
+ * @returns retry — ロード失敗後に再試行する関数
  * @returns openFolderPicker — フォルダ選択ダイアログを開き、選択結果を返す Promise
  */
 export function useGooglePicker() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const pickerReady = useRef(false);
-  const scriptLoading = useRef(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -63,23 +66,24 @@ export function useGooglePicker() {
   const initPicker = useCallback(() => {
     window.gapi.load("picker", () => {
       pickerReady.current = true;
-      if (mounted.current) setLoading(false);
+      if (mounted.current) {
+        setLoading(false);
+        setError(null);
+      }
     });
   }, []);
 
   useEffect(() => {
-    if (scriptLoading.current) return;
-    scriptLoading.current = true;
-
     const existingScript = document.querySelector(
       `script[src="${PICKER_SCRIPT_SRC}"]`,
     );
+    if (existingScript && window.gapi) {
+      initPicker();
+      return;
+    }
+
     if (existingScript) {
-      if (window.gapi) {
-        initPicker();
-      } else {
-        existingScript.addEventListener("load", initPicker, { once: true });
-      }
+      existingScript.addEventListener("load", initPicker, { once: true });
       return;
     }
 
@@ -89,12 +93,21 @@ export function useGooglePicker() {
     script.onload = initPicker;
     script.onerror = () => {
       console.error("Google Picker API の読み込みに失敗しました。");
-      scriptLoading.current = false;
       script.remove();
-      if (mounted.current) setLoading(false);
+      if (mounted.current) {
+        setLoading(false);
+        setError(new Error("Google Picker API の読み込みに失敗しました。"));
+      }
     };
     document.head.appendChild(script);
-  }, [initPicker]);
+  }, [initPicker, attempt]);
+
+  const retry = useCallback(() => {
+    if (pickerReady.current) return;
+    setLoading(true);
+    setError(null);
+    setAttempt((prev) => prev + 1);
+  }, []);
 
   const openFolderPicker = useCallback(
     (accessToken: string): Promise<{ id: string; name: string } | null> => {
@@ -129,5 +142,5 @@ export function useGooglePicker() {
     [],
   );
 
-  return { loading, openFolderPicker };
+  return { loading, error, retry, openFolderPicker };
 }

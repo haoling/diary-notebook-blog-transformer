@@ -40,12 +40,20 @@ export class IndexManager {
       );
       this._fileId = result._fileId;
       const { _fileId: _, _file: __, version, ...rest } = result;
-      this.index = rest as AppIndex;
+      this.index = {
+        sessions: Array.isArray(rest.sessions) ? [...rest.sessions] : [...DEFAULT_INDEX.sessions],
+        photos: Array.isArray(rest.photos) ? [...rest.photos] : [...DEFAULT_INDEX.photos],
+        articles: Array.isArray(rest.articles) ? [...rest.articles] : [...DEFAULT_INDEX.articles],
+      };
       this._version = version ?? 0;
       return this.index;
     } catch (err) {
       if (err instanceof DriveNotFoundError) {
-        const newIndex = { ...DEFAULT_INDEX };
+        const newIndex: AppIndex = {
+          sessions: [...DEFAULT_INDEX.sessions],
+          photos: [...DEFAULT_INDEX.photos],
+          articles: [...DEFAULT_INDEX.articles],
+        };
         const file = await this.client.createAppDataFile(
           INDEX_FILE_NAME,
           { ...newIndex, version: 1 },
