@@ -46,7 +46,7 @@ export class IndexManager {
         articles: Array.isArray(rest.articles) ? [...rest.articles] : [...DEFAULT_INDEX.articles],
       };
       this._version = version ?? 0;
-      return { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles] };
+      return this.cloneIndex();
     } catch (err) {
       if (err instanceof DriveNotFoundError) {
         const newIndex: AppIndex = {
@@ -61,7 +61,7 @@ export class IndexManager {
         this._fileId = file.id;
         this.index = newIndex;
         this._version = 1;
-        return { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles] };
+        return this.cloneIndex();
       }
       throw err;
     }
@@ -105,33 +105,46 @@ export class IndexManager {
     this._version = nextVersion;
   }
 
+  private cloneEntries<T>(entries: T[]): T[] {
+    return structuredClone(entries);
+  }
+
+  private cloneIndex(): AppIndex {
+    const idx = this.index!;
+    return {
+      sessions: this.cloneEntries(idx.sessions),
+      photos: this.cloneEntries(idx.photos),
+      articles: this.cloneEntries(idx.articles),
+    };
+  }
+
   /** インデックス全体を取得する。 */
   getAll(): AppIndex {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    return { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles] };
+    return this.cloneIndex();
   }
 
   getSessions(): IndexSessionEntry[] {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    return [...this.index.sessions];
+    return this.cloneEntries(this.index.sessions);
   }
 
   getPhotos(): IndexPhotoEntry[] {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    return [...this.index.photos];
+    return this.cloneEntries(this.index.photos);
   }
 
   getArticles(): IndexArticleEntry[] {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    return [...this.index.articles];
+    return this.cloneEntries(this.index.articles);
   }
 
   /** セッションエントリを追加する。 */
