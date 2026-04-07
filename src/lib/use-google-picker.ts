@@ -45,6 +45,7 @@ interface PickerBuilder {
   setDeveloperKey: (key: string) => PickerBuilder;
   setAppId: (appId: string) => PickerBuilder;
   build: () => { setVisible: (visible: boolean) => void };
+  setSelectFolderEnabled: (enabled: boolean) => PickerBuilder;
 }
 
 const PICKER_SCRIPT_SRC = "https://apis.google.com/js/api.js";
@@ -137,6 +138,7 @@ export function useGooglePicker() {
         const pickerInstance = new picker.PickerBuilder()
           .addView(view)
           .setOAuthToken(accessToken)
+          .setSelectFolderEnabled(true)
           .setCallback((data: Record<string, unknown>) => {
             const action = data[picker.Response.ACTION];
             if (action === picker.Action.PICKED) {
