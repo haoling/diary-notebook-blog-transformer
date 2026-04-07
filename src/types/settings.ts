@@ -3,7 +3,7 @@ export type Settings = {
   visionApiKey?: string;
   notebookImageFolderId?: string;
   notebookImageFolderName?: string;
-  /** 並行書き込み検知用のバージョン番号。 */
+  /** 永続化ごとにインクリメントされるバージョン番号。 */
   version?: number;
 };
 
@@ -35,6 +35,6 @@ export type AppIndex = {
   sessions: IndexSessionEntry[];
   photos: IndexPhotoEntry[];
   articles: IndexArticleEntry[];
-  /** 並行書き込み検知用のバージョン番号。 */
+  /** 永続化ごとにインクリメントされるバージョン番号。 */
   version?: number;
 };
