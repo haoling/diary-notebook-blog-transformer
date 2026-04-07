@@ -78,8 +78,8 @@ export class IndexManager {
       }
     }
 
-    this._version++;
-    const data = { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles], version: this._version };
+    const nextVersion = this._version + 1;
+    const data = { ...this.index, sessions: [...this.index.sessions], photos: [...this.index.photos], articles: [...this.index.articles], version: nextVersion };
 
     if (this._fileId) {
       try {
@@ -90,6 +90,7 @@ export class IndexManager {
           this._fileId = null;
           const file = await this.client.createAppDataFile(INDEX_FILE_NAME, data);
           this._fileId = file.id;
+          this._version = nextVersion;
           return;
         }
         throw err;
@@ -98,6 +99,8 @@ export class IndexManager {
       const file = await this.client.createAppDataFile(INDEX_FILE_NAME, data);
       this._fileId = file.id;
     }
+
+    this._version = nextVersion;
   }
 
   /** インデックス全体を取得する。 */

@@ -67,8 +67,8 @@ export class SettingsManager {
       }
     }
 
-    this._version++;
-    const data: Settings = { ...this.settings, version: this._version };
+    const nextVersion = this._version + 1;
+    const data: Settings = { ...this.settings, version: nextVersion };
 
     if (this._fileId) {
       try {
@@ -79,6 +79,7 @@ export class SettingsManager {
           this._fileId = null;
           const file = await this.client.createAppDataFile(SETTINGS_FILE_NAME, data);
           this._fileId = file.id;
+          this._version = nextVersion;
           return;
         }
         throw err;
@@ -87,6 +88,8 @@ export class SettingsManager {
       const file = await this.client.createAppDataFile(SETTINGS_FILE_NAME, data);
       this._fileId = file.id;
     }
+
+    this._version = nextVersion;
   }
 
   /** 設定全体を取得する。 */

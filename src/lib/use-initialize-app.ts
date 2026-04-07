@@ -52,6 +52,7 @@ export function useInitializeApp(): InitializeAppResult {
           notebookImageFolderName: folder.name,
         });
         setSettings(sm.getAll());
+        setError(null);
         setStatus("ready");
       } catch (err) {
         const message =
