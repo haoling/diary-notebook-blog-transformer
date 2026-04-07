@@ -71,10 +71,9 @@ export class IndexManager {
   /**
    * インメモリ状態を appDataFolder に永続化する。version をインクリメントする。
    *
-   * version 確認のためにファイル全体を事前取得すると、更新のたびに
-   * 全文ダウンロード→全文アップロードが発生するため、
-   * persist() ではインメモリ上の version をそのまま進めて書き込む。
-   * ファイルが消えていた場合のみ新規作成にフォールバックする。
+   * - last-write-wins 方針を採用しており、並行書き込み検知は行わない。
+   * - version は書き込みのたびに単調増加するスタンプであり、競合検知用ではない。
+   * - ファイルが消えていた場合のみ新規作成にフォールバックする。
    */
   private persist(): Promise<void> {
     const p = this.persistChain.then(() => this.doPersist());

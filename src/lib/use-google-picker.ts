@@ -81,18 +81,19 @@ export function useGooglePicker() {
   }, []);
 
   useEffect(() => {
-    const existingScript = document.querySelector(
+    const existingScript = document.querySelector<HTMLScriptElement>(
       `script[src="${PICKER_SCRIPT_SRC}"]`,
     );
-    if (existingScript && window.gapi) {
-      initPicker();
-      return;
-    }
 
     if (existingScript) {
-      const handleScriptLoad = () => { initPicker(); };
-      existingScript.addEventListener("load", handleScriptLoad, { once: true });
-      return () => { existingScript.removeEventListener("load", handleScriptLoad); };
+      initPicker();
+      const handleScriptEvent = () => { initPicker(); };
+      existingScript.addEventListener("load", handleScriptEvent, { once: true });
+      existingScript.addEventListener("error", handleScriptEvent, { once: true });
+      return () => {
+        existingScript.removeEventListener("load", handleScriptEvent);
+        existingScript.removeEventListener("error", handleScriptEvent);
+      };
     }
 
     const script = document.createElement("script");
