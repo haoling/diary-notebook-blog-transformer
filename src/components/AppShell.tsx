@@ -1,13 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useAuth } from "@/lib/auth-context";
 import { Navigation } from "@/components/Navigation";
 import { UserProfile } from "@/components/UserProfile";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">

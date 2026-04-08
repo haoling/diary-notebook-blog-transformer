@@ -26,6 +26,7 @@ interface AuthContextValue {
   user: UserInfo | null;
   accessToken: string | null;
   isAuthenticated: boolean;
+  isInitializing: boolean;
   login: () => void;
   logout: () => void;
 }
@@ -35,7 +36,14 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
   const expireTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Google Library API は非同期で読み込まれるため、初期化完了を遅延検知する
+  useEffect(() => {
+    const timer = setTimeout(() => setIsInitializing(false), 500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const clearAuth = useCallback(() => {
     googleLogout();
@@ -95,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         accessToken,
         isAuthenticated: !!user && !!accessToken,
+        isInitializing,
         login,
         logout,
       }}
