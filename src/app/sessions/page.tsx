@@ -4,7 +4,9 @@ import { AppShell } from "@/components/AppShell";
 import { useRequireAuth } from "@/lib/use-require-auth";
 
 export default function SessionsPage() {
-  useRequireAuth();
+  const { isAuthorized } = useRequireAuth();
+
+  if (!isAuthorized) return null;
 
   return (
     <AppShell>

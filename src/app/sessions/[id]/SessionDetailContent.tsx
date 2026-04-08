@@ -5,8 +5,10 @@ import { AppShell } from "@/components/AppShell";
 import { useRequireAuth } from "@/lib/use-require-auth";
 
 export function SessionDetailContent() {
-  useRequireAuth();
+  const { isAuthorized } = useRequireAuth();
   const params = useParams<{ id: string }>();
+
+  if (!isAuthorized) return null;
 
   return (
     <AppShell>
