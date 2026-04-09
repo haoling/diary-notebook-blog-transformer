@@ -155,6 +155,7 @@ export default function SessionsPage() {
             >
               <Link
                 href={`/sessions/${session.id}`}
+                prefetch={false}
                 className="flex-1 min-w-0 hover:opacity-80 transition-opacity"
               >
                 <div className="flex items-center gap-3">
