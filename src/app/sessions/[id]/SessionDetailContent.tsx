@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 import { createDriveClient } from "@/lib/drive-client";
 import { ImageCaptureModule } from "@/components/ImageCaptureModule";
 import { ScannerUploadModule } from "@/components/ScannerUploadModule";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { ScanSession, ScanPage } from "@/types/scan";
 
 function formatDateTime(iso: string): string {
@@ -176,6 +177,34 @@ export function SessionDetailContent() {
     );
   }
 
+  if (status === "needsFolderSelection") {
+    return (
+      <AppShell>
+        <div className="mb-4">
+          <Link
+            href="/sessions"
+            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+          >
+            ← セッション一覧に戻る
+          </Link>
+        </div>
+        <div className="text-center py-12">
+          <div className="text-3xl mb-4">📁</div>
+          <p className="text-slate-800 mb-2">手帳画像フォルダの設定が必要です</p>
+          <p className="text-sm text-slate-500 mb-6">
+            フォルダが未設定、または設定済みフォルダにアクセスできません。セッション操作を続けるには設定を確認してください。
+          </p>
+          <Link
+            href="/settings"
+            className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            設定画面へ
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
+
   if (status === "error" && initError) {
     return (
       <AppShell>
@@ -277,41 +306,14 @@ export function SessionDetailContent() {
         </div>
       )}
 
-      {deleteTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setDeleteTarget(null)}
-        >
-          <div
-            className="mx-4 w-full max-w-sm rounded-lg bg-white p-6 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="mb-2 text-lg font-semibold text-gray-900">
-              ページの削除
-            </h2>
-            <p className="mb-6 text-sm text-gray-600">
-              このページを削除しますか？Google Drive 上の画像も削除されます。この操作は取り消せません。
-            </p>
-            <div className="flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(null)}
-                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                onClick={handleDeletePage}
-                disabled={deleting}
-                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-              >
-                {deleting ? "削除中..." : "削除"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="ページの削除"
+        message="このページを削除しますか？Google Drive 上の画像も削除されます。この操作は取り消せません。"
+        loading={deleting}
+        onConfirm={handleDeletePage}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </AppShell>
   );
 }

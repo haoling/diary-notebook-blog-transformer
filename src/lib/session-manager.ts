@@ -63,6 +63,14 @@ export class SessionManager {
     return result._fileId;
   }
 
+  /** セッションを読み込み、{ session, fileId } を返す（二重リクエストを回避）。 */
+  private async loadSessionWithFileId(sessionId: string): Promise<{ session: ScanSession; fileId: string }> {
+    const fileName = sessionFileName(sessionId);
+    const result = await this.client.getAppDataFileByName<ScanSession>(fileName);
+    const { _fileId, _file: _, ...session } = result;
+    return { session, fileId: _fileId };
+  }
+
   /** 新規セッションを作成する。 */
   async createSession(): Promise<ScanSession> {
     const session: ScanSession = {
@@ -83,8 +91,7 @@ export class SessionManager {
 
   /** セッションを読み込む。 */
   async loadSession(sessionId: string): Promise<ScanSession> {
-    const fileId = await this.getSessionFileId(sessionId);
-    const session = await this.client.getFileContent<ScanSession>(fileId);
+    const { session } = await this.loadSessionWithFileId(sessionId);
     return session;
   }
 
@@ -124,7 +131,7 @@ export class SessionManager {
     imageBlob: Blob,
     fileName: string,
   ): Promise<ScanPage> {
-    const session = await this.loadSession(sessionId);
+    const { session } = await this.loadSessionWithFileId(sessionId);
     const folderId = this.getNotebookFolderId();
 
     const driveFile = await this.client.uploadImage(
@@ -140,14 +147,27 @@ export class SessionManager {
     };
 
     session.pages.push(page);
-    await this.saveSessionAndUpdateIndex(session);
+
+    try {
+      await this.saveSessionAndUpdateIndex(session);
+    } catch (err) {
+      try {
+        await this.client.deleteFile(driveFile.id);
+      } catch (rollbackErr) {
+        console.warn(
+          `セッション保存失敗後のページ画像ロールバックに失敗しました (fileId: ${driveFile.id}):`,
+          rollbackErr,
+        );
+      }
+      throw err;
+    }
 
     return page;
   }
 
   /** ページをセッションから削除し、対応する Drive 上の画像も削除する。 */
   async removePage(sessionId: string, pageId: string): Promise<void> {
-    const session = await this.loadSession(sessionId);
+    const { session } = await this.loadSessionWithFileId(sessionId);
     const page = session.pages.find((p) => p.id === pageId);
     if (!page) {
       throw new Error(`ページ ${pageId} がセッション ${sessionId} に見つかりません。`);
