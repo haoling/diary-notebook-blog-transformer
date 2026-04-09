@@ -15,15 +15,15 @@ interface RequireAuthResult {
  * 呼び出し側で `isAuthorized` を使ってコンテンツの描画をガードする。
  */
 export function useRequireAuth(): RequireAuthResult {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isRestoring } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    if (!isAuthenticated && pathname !== "/") {
+    if (!isRestoring && !isAuthenticated && pathname !== "/") {
       router.replace("/");
     }
-  }, [isAuthenticated, pathname, router]);
+  }, [isAuthenticated, isRestoring, pathname, router]);
 
-  return { isAuthorized: isAuthenticated };
+  return { isAuthorized: !isRestoring && isAuthenticated };
 }
