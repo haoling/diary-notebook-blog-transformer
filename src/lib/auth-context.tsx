@@ -3,7 +3,7 @@
 import {
   createContext,
   useContext,
-  useState,
+  useReducer,
   useCallback,
   useRef,
   useEffect,
@@ -26,26 +26,116 @@ interface AuthContextValue {
   user: UserInfo | null;
   accessToken: string | null;
   isAuthenticated: boolean;
+  /** 初回マウント時に sessionStorage から認証状態を復元中か */
+  isRestoring: boolean;
   login: () => void;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const STORAGE_KEY_TOKEN = "auth_access_token";
+const STORAGE_KEY_EXPIRES_AT = "auth_expires_at";
+const STORAGE_KEY_USER = "auth_user_info";
+
+function persistAuth(token: string, expiresIn: number, userInfo: UserInfo) {
+  const expiresAt = Date.now() + expiresIn * 1000;
+  sessionStorage.setItem(STORAGE_KEY_TOKEN, token);
+  sessionStorage.setItem(STORAGE_KEY_EXPIRES_AT, String(expiresAt));
+  sessionStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
+}
+
+function clearPersistedAuth() {
+  sessionStorage.removeItem(STORAGE_KEY_TOKEN);
+  sessionStorage.removeItem(STORAGE_KEY_EXPIRES_AT);
+  sessionStorage.removeItem(STORAGE_KEY_USER);
+}
+
+interface PersistedAuth {
+  token: string;
+  expiresAt: number;
+  userInfo: UserInfo;
+}
+
+function loadPersistedAuth(): PersistedAuth | null {
+  const token = sessionStorage.getItem(STORAGE_KEY_TOKEN);
+  const expiresAt = sessionStorage.getItem(STORAGE_KEY_EXPIRES_AT);
+  const userInfo = sessionStorage.getItem(STORAGE_KEY_USER);
+  if (!token || !expiresAt || !userInfo) return null;
+  if (Date.now() >= Number(expiresAt)) {
+    clearPersistedAuth();
+    return null;
+  }
+  try {
+    return { token, expiresAt: Number(expiresAt), userInfo: JSON.parse(userInfo) };
+  } catch {
+    clearPersistedAuth();
+    return null;
+  }
+}
+
+interface AuthState {
+  user: UserInfo | null;
+  accessToken: string | null;
+  isRestoring: boolean;
+}
+
+type AuthAction =
+  | { type: "RESTORE"; payload: PersistedAuth }
+  | { type: "LOGIN"; payload: { token: string; expiresIn: number; userInfo: UserInfo } }
+  | { type: "CLEAR" };
+
+function authReducer(state: AuthState, action: AuthAction): AuthState {
+  switch (action.type) {
+    case "RESTORE":
+      return {
+        user: action.payload.userInfo,
+        accessToken: action.payload.token,
+        isRestoring: false,
+      };
+    case "LOGIN":
+      persistAuth(action.payload.token, action.payload.expiresIn, action.payload.userInfo);
+      return {
+        user: action.payload.userInfo,
+        accessToken: action.payload.token,
+        isRestoring: false,
+      };
+    case "CLEAR":
+      clearPersistedAuth();
+      return { user: null, accessToken: null, isRestoring: false };
+  }
+}
+
+const INITIAL_STATE: AuthState = {
+  user: null,
+  accessToken: null,
+  isRestoring: true,
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<UserInfo | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(authReducer, INITIAL_STATE);
   const expireTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearAuth = useCallback(() => {
     googleLogout();
-    setUser(null);
-    setAccessToken(null);
+    dispatch({ type: "CLEAR" });
     if (expireTimer.current) {
       clearTimeout(expireTimer.current);
       expireTimer.current = null;
     }
   }, []);
+
+  // 初回マウント時に sessionStorage から認証状態を復元
+  useEffect(() => {
+    const persisted = loadPersistedAuth();
+    if (persisted) {
+      const remainingMs = Math.max(0, persisted.expiresAt - Date.now() - 60_000);
+      expireTimer.current = setTimeout(clearAuth, remainingMs);
+      dispatch({ type: "RESTORE", payload: persisted });
+    } else {
+      dispatch({ type: "CLEAR" });
+    }
+  }, [clearAuth]);
 
   useEffect(() => {
     return () => {
@@ -69,8 +159,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const token = tokenResponse.access_token;
         const userInfo = await fetchUserInfo(token);
-        setUser(userInfo);
-        setAccessToken(token);
+        dispatch({
+          type: "LOGIN",
+          payload: { token, expiresIn: tokenResponse.expires_in ?? 3600, userInfo },
+        });
         if (expireTimer.current) clearTimeout(expireTimer.current);
         const expiresInMs = (tokenResponse.expires_in ?? 3600) * 1000;
         const buffer = 60_000;
@@ -92,9 +184,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        user,
-        accessToken,
-        isAuthenticated: !!user && !!accessToken,
+        user: state.user,
+        accessToken: state.accessToken,
+        isAuthenticated: !!state.user && !!state.accessToken,
+        isRestoring: state.isRestoring,
         login,
         logout,
       }}
