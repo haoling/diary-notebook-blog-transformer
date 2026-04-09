@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -60,13 +59,13 @@ export default function SessionsPage() {
     try {
       const session = await sessionManager.createSession();
       refreshSessions();
-      router.push(`/sessions/${session.id}`);
+      window.location.href = `/sessions/${session.id}`;
     } catch (err) {
       console.error("セッション作成に失敗しました:", err);
     } finally {
       setCreating(false);
     }
-  }, [sessionManager, router, refreshSessions]);
+  }, [sessionManager, refreshSessions]);
 
   const handleDelete = useCallback(async () => {
     if (!sessionManager || !deleteTarget) return;
@@ -153,10 +152,10 @@ export default function SessionsPage() {
               key={session.id}
               className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
             >
-              <Link
-                href={`/sessions/${session.id}`}
-                prefetch={false}
-                className="flex-1 min-w-0 hover:opacity-80 transition-opacity"
+              <button
+                type="button"
+                onClick={() => { window.location.href = `/sessions/${session.id}`; }}
+                className="flex-1 min-w-0 hover:opacity-80 transition-opacity text-left"
               >
                 <div className="flex items-center gap-3">
                   <div className="shrink-0 w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-lg">
@@ -171,7 +170,7 @@ export default function SessionsPage() {
                     </p>
                   </div>
                 </div>
-              </Link>
+              </button>
               <button
                 type="button"
                 onClick={() => setDeleteTarget(session.id)}
