@@ -1,8 +1,9 @@
 // NOTE:
 // Static export モードでは generateStaticParams で列挙されたパスのみが生成される。
 // 実データの ID はビルド時に不明なため、ダミーパス `/articles/_` のみを生成している。
-// クライアントサイドナビゲーション経由では任意の `/articles/<id>` にアクセス可能だが、
-// 直URL アクセス・リロード時は 404 になる制約がある。
+// GitHub Pages の SPA フォールバック（404.html → index.html）により、
+// 直接 URL アクセス・リロード時でもクライアントサイドルーターが正しく動作する。
+// このフォールバックは build スクリプトで `cp out/index.html out/404.html` により実現している。
 import { EditArticleContent } from "./EditArticleContent";
 
 export function generateStaticParams() {

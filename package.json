@@ -4,7 +4,7 @@
   "description": "> システム手帳に書いた日記はデジタルにして、デジカメで撮った写真と一緒にブログ形式になるべきだと思うんですよ",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && cp out/index.html out/404.html",
     "start": "next start",
     "lint": "eslint src/"
   },
