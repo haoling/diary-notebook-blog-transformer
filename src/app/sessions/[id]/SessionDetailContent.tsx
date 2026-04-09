@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -27,20 +27,24 @@ type PageThumbnailProps = {
 function PageThumbnail({ page, accessToken, onDelete }: PageThumbnailProps) {
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    let objectUrl: string | null = null;
     const client = createDriveClient(accessToken);
 
     async function loadThumbnail() {
+      setLoadError(false);
+      setLoading(true);
+      setThumbnailUrl(null);
       try {
         const blob = await client.getFileBlob(page.originalFileId);
         if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        setThumbnailUrl(url);
+        objectUrl = URL.createObjectURL(blob);
+        setThumbnailUrl(objectUrl);
       } catch {
-        if (!cancelled) setError(true);
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -49,6 +53,7 @@ function PageThumbnail({ page, accessToken, onDelete }: PageThumbnailProps) {
     loadThumbnail();
     return () => {
       cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [page.originalFileId, accessToken]);
 
@@ -60,7 +65,7 @@ function PageThumbnail({ page, accessToken, onDelete }: PageThumbnailProps) {
             <div className="text-slate-300 text-sm">読み込み中...</div>
           </div>
         )}
-        {error && (
+        {loadError && (
           <div className="flex items-center justify-center h-full">
             <div className="text-slate-400 text-sm">表示できません</div>
           </div>
@@ -95,7 +100,6 @@ function PageThumbnail({ page, accessToken, onDelete }: PageThumbnailProps) {
 export function SessionDetailContent() {
   const { isAuthorized } = useRequireAuth();
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const { accessToken } = useAuth();
   const { status, sessionManager, error: initError } = useInitializeApp();
 
@@ -132,6 +136,7 @@ export function SessionDetailContent() {
     async (blob: Blob, fileName: string) => {
       if (!sessionManager || !params.id) return;
       setAddingPage(true);
+      setError(null);
       try {
         await sessionManager.addPage(params.id, blob, fileName);
         await loadSession();
@@ -147,6 +152,7 @@ export function SessionDetailContent() {
   const handleDeletePage = useCallback(async () => {
     if (!sessionManager || !params.id || !deleteTarget) return;
     setDeleting(true);
+    setError(null);
     try {
       await sessionManager.removePage(params.id, deleteTarget);
       setDeleteTarget(null);

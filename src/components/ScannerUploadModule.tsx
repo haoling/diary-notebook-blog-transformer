@@ -27,31 +27,24 @@ export const ScannerUploadModule = ({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const processFile = useCallback(
-    async (file: File) => {
+  const onDrop = useCallback(
+    async (acceptedFiles: File[]) => {
       setUploading(true);
       setError(null);
-      try {
-        const blob = new Blob([file], { type: file.type });
-        await onUpload(blob, file.name);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "アップロードに失敗しました。",
-        );
-      } finally {
-        setUploading(false);
+      for (const file of acceptedFiles) {
+        try {
+          const blob = new Blob([file], { type: file.type });
+          await onUpload(blob, file.name);
+        } catch (err) {
+          setError(
+            err instanceof Error ? err.message : "アップロードに失敗しました。",
+          );
+          break;
+        }
       }
+      setUploading(false);
     },
     [onUpload],
-  );
-
-  const onDrop = useCallback(
-    (acceptedFiles: File[]) => {
-      for (const file of acceptedFiles) {
-        processFile(file);
-      }
-    },
-    [processFile],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

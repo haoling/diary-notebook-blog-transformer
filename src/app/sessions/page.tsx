@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useInitializeApp } from "@/lib/use-initialize-app";
+import { useAuth } from "@/lib/auth-context";
 import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import type { IndexSessionEntry } from "@/types/settings";
 
@@ -17,10 +18,12 @@ function formatDateTime(iso: string): string {
 
 export default function SessionsPage() {
   const { isAuthorized } = useRequireAuth();
+  const { accessToken } = useAuth();
   const router = useRouter();
   const {
     status,
     index,
+    indexManager,
     error,
     sessionManager,
     handleFolderSelected,
@@ -30,6 +33,16 @@ export default function SessionsPage() {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const refreshSessions = useCallback(() => {
+    if (indexManager) {
+      const latestIndex = indexManager.getAll();
+      const sorted = [...latestIndex.sessions].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      setSessions(sorted);
+    }
+  }, [indexManager]);
 
   useEffect(() => {
     if (index) {
@@ -45,19 +58,21 @@ export default function SessionsPage() {
     setCreating(true);
     try {
       const session = await sessionManager.createSession();
+      refreshSessions();
       router.push(`/sessions/${session.id}`);
     } catch (err) {
       console.error("セッション作成に失敗しました:", err);
     } finally {
       setCreating(false);
     }
-  }, [sessionManager, router]);
+  }, [sessionManager, router, refreshSessions]);
 
   const handleDelete = useCallback(async () => {
     if (!sessionManager || !deleteTarget) return;
     setDeleting(true);
     try {
       await sessionManager.deleteSession(deleteTarget);
+      setSessions((prev) => prev.filter((s) => s.id !== deleteTarget));
       setDeleteTarget(null);
     } catch (err) {
       console.error("セッション削除に失敗しました:", err);
@@ -88,7 +103,7 @@ export default function SessionsPage() {
           </p>
         </div>
         <FolderPickerDialog
-          accessToken={""}
+          accessToken={accessToken ?? ""}
           onSelect={handleFolderSelected}
           onCancel={() => router.push("/settings")}
         />
@@ -150,7 +165,7 @@ export default function SessionsPage() {
                       {formatDateTime(session.createdAt)}
                     </p>
                     <p className="text-xs text-slate-400">
-                      {session.pageCount} ページ
+                      {session.pageCount ?? 0} ページ
                     </p>
                   </div>
                 </div>

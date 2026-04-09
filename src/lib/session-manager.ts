@@ -111,11 +111,6 @@ export class SessionManager {
 
   /** インデックスエントリをセッションの現在の状態と同期する。 */
   private async syncIndexEntry(session: ScanSession): Promise<void> {
-    const sessions = this.indexManager.getSessions();
-    const exists = sessions.some((s) => s.id === session.id);
-    if (exists) {
-      await this.indexManager.removeSession(session.id);
-    }
     await this.indexManager.addSession({
       id: session.id,
       createdAt: session.createdAt,

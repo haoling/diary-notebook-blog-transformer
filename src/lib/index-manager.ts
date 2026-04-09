@@ -42,7 +42,9 @@ export class IndexManager {
       this._fileId = result._fileId;
       const { _fileId: _, _file: __, version, ...rest } = result;
       this.index = {
-        sessions: Array.isArray(rest.sessions) ? [...rest.sessions] : [...DEFAULT_INDEX.sessions],
+        sessions: Array.isArray(rest.sessions)
+          ? rest.sessions.map((s) => ({ ...s, pageCount: s.pageCount ?? 0 }))
+          : [...DEFAULT_INDEX.sessions],
         photos: Array.isArray(rest.photos) ? [...rest.photos] : [...DEFAULT_INDEX.photos],
         articles: Array.isArray(rest.articles) ? [...rest.articles] : [...DEFAULT_INDEX.articles],
       };
@@ -163,11 +165,12 @@ export class IndexManager {
     return this.cloneEntries(this.index.articles);
   }
 
-  /** セッションエントリを追加する。 */
+  /** セッションエントリを追加する。同一 ID が既存の場合は置換（upsert）。 */
   async addSession(entry: IndexSessionEntry): Promise<void> {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
+    this.index.sessions = this.index.sessions.filter((s) => s.id !== entry.id);
     this.index.sessions.push(...this.cloneEntries([entry]));
     await this.persist();
   }
