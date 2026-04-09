@@ -46,13 +46,7 @@ export class SessionManager {
   /** セッションID単位でミューテーションを直列化する。 */
   private async runSerialized(sessionId: string, fn: () => Promise<void>): Promise<void> {
     const prev = this.sessionMutationChains.get(sessionId) ?? Promise.resolve();
-    let next: Promise<void>;
-    let resolved = false;
-    next = prev.then(() => fn(), () => fn());
-    next.then(
-      () => { resolved = true; },
-      () => { resolved = true; },
-    );
+    const next = prev.then(() => fn(), () => fn());
     this.sessionMutationChains.set(sessionId, next);
     await next;
     if (this.sessionMutationChains.get(sessionId) === next) {
