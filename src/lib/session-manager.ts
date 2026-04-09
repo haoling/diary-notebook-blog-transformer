@@ -31,6 +31,7 @@ export class SessionManager {
   private readonly client: DriveClient;
   private readonly settingsManager: SettingsManager;
   private readonly indexManager: IndexManager;
+  private readonly sessionMutationChains = new Map<string, Promise<void>>();
 
   constructor(
     client: DriveClient,
@@ -40,6 +41,14 @@ export class SessionManager {
     this.client = client;
     this.settingsManager = settingsManager;
     this.indexManager = indexManager;
+  }
+
+  /** セッションID単位でミューテーションを直列化する。 */
+  private async runSerialized(sessionId: string, fn: () => Promise<void>): Promise<void> {
+    const prev = this.sessionMutationChains.get(sessionId) ?? Promise.resolve();
+    const next = prev.then(fn, fn);
+    this.sessionMutationChains.set(sessionId, next);
+    await next;
   }
 
   /** 手帳画像フォルダ ID を取得する。未設定ならエラー。 */
@@ -131,66 +140,72 @@ export class SessionManager {
     imageBlob: Blob,
     fileName: string,
   ): Promise<ScanPage> {
-    const { session } = await this.loadSessionWithFileId(sessionId);
-    const folderId = this.getNotebookFolderId();
+    let result: ScanPage | undefined;
+    await this.runSerialized(sessionId, async () => {
+      const { session } = await this.loadSessionWithFileId(sessionId);
+      const folderId = this.getNotebookFolderId();
 
-    const driveFile = await this.client.uploadImage(
-      folderId,
-      fileName,
-      imageBlob,
-    );
+      const driveFile = await this.client.uploadImage(
+        folderId,
+        fileName,
+        imageBlob,
+      );
 
-    const page: ScanPage = {
-      id: this.generateId(),
-      capturedAt: new Date().toISOString(),
-      originalFileId: driveFile.id,
-    };
+      const page: ScanPage = {
+        id: this.generateId(),
+        capturedAt: new Date().toISOString(),
+        originalFileId: driveFile.id,
+      };
 
-    session.pages.push(page);
+      session.pages.push(page);
 
-    try {
-      await this.saveSession(session);
-    } catch (err) {
       try {
-        await this.client.deleteFile(driveFile.id);
-      } catch (rollbackErr) {
+        await this.saveSession(session);
+      } catch (err) {
+        try {
+          await this.client.deleteFile(driveFile.id);
+        } catch (rollbackErr) {
+          console.warn(
+            `セッション保存失敗後のページ画像ロールバックに失敗しました (fileId: ${driveFile.id}):`,
+            rollbackErr,
+          );
+        }
+        throw err;
+      }
+
+      try {
+        await this.syncIndexEntry(session);
+      } catch (indexErr) {
         console.warn(
-          `セッション保存失敗後のページ画像ロールバックに失敗しました (fileId: ${driveFile.id}):`,
-          rollbackErr,
+          `インデックス更新に失敗しました（セッションは正常に保存済みです）:`,
+          indexErr,
         );
       }
-      throw err;
-    }
 
-    try {
-      await this.syncIndexEntry(session);
-    } catch (indexErr) {
-      console.warn(
-        `インデックス更新に失敗しました（セッションは正常に保存済みです）:`,
-        indexErr,
-      );
-    }
-
-    return page;
+      result = page;
+    });
+    return result!;
   }
 
   /** ページをセッションから削除し、対応する Drive 上の画像も削除する。 */
   async removePage(sessionId: string, pageId: string): Promise<void> {
-    const { session } = await this.loadSessionWithFileId(sessionId);
-    const page = session.pages.find((p) => p.id === pageId);
-    if (!page) {
-      throw new Error(`ページ ${pageId} がセッション ${sessionId} に見つかりません。`);
-    }
+    await this.runSerialized(sessionId, async () => {
+      const { session } = await this.loadSessionWithFileId(sessionId);
+      const page = session.pages.find((p) => p.id === pageId);
+      if (!page) {
+        throw new Error(`ページ ${pageId} がセッション ${sessionId} に見つかりません。`);
+      }
 
-    session.pages = session.pages.filter((p) => p.id !== pageId);
+      session.pages = session.pages.filter((p) => p.id !== pageId);
 
-    await this.saveSessionAndUpdateIndex(session);
+      await this.saveSessionAndUpdateIndex(session);
 
-    try {
-      await this.client.deleteFile(page.originalFileId);
-    } catch (err) {
-      console.warn(`ページ画像の削除に失敗しました (fileId: ${page.originalFileId}):`, err);
-    }
+      try {
+        await this.client.deleteFile(page.originalFileId);
+      } catch (err) {
+        console.warn(`ページ画像の削除に失敗しました (fileId: ${page.originalFileId}):`, err);
+      }
+    });
   }
 
   /** セッション全体を削除する（ページ画像も Drive から削除）。 */

@@ -33,8 +33,7 @@ export const ScannerUploadModule = ({
       setError(null);
       for (const file of acceptedFiles) {
         try {
-          const blob = new Blob([file], { type: file.type });
-          await onUpload(blob, file.name);
+          await onUpload(file, file.name);
         } catch (err) {
           setError(
             err instanceof Error ? err.message : "アップロードに失敗しました。",
