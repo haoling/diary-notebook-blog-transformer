@@ -59,8 +59,8 @@ export class SessionManager {
   /** セッションの appDataFolder ファイル ID を取得する。 */
   private async getSessionFileId(sessionId: string): Promise<string> {
     const fileName = sessionFileName(sessionId);
-    const result = await this.client.getAppDataFileByName(fileName);
-    return result._fileId;
+    const file = await this.client.findAppDataFileByName(fileName);
+    return file.id;
   }
 
   /** セッションを読み込み、{ session, fileId } を返す（二重リクエストを回避）。 */
@@ -149,7 +149,7 @@ export class SessionManager {
     session.pages.push(page);
 
     try {
-      await this.saveSessionAndUpdateIndex(session);
+      await this.saveSession(session);
     } catch (err) {
       try {
         await this.client.deleteFile(driveFile.id);
@@ -160,6 +160,15 @@ export class SessionManager {
         );
       }
       throw err;
+    }
+
+    try {
+      await this.syncIndexEntry(session);
+    } catch (indexErr) {
+      console.warn(
+        `インデックス更新に失敗しました（セッションは正常に保存済みです）:`,
+        indexErr,
+      );
     }
 
     return page;

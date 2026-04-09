@@ -106,7 +106,8 @@ export function SessionDetailContent() {
 
   const [session, setSession] = useState<ScanSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const [addingPage, setAddingPage] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -114,12 +115,13 @@ export function SessionDetailContent() {
   const loadSession = useCallback(async () => {
     if (!sessionManager || !params.id) return;
     setLoading(true);
-    setError(null);
+    setLoadError(null);
+    setOperationError(null);
     try {
       const s = await sessionManager.loadSession(params.id);
       setSession(s);
     } catch (err) {
-      setError(
+      setLoadError(
         err instanceof Error ? err.message : "セッションの読み込みに失敗しました。",
       );
     } finally {
@@ -137,12 +139,12 @@ export function SessionDetailContent() {
     async (blob: Blob, fileName: string) => {
       if (!sessionManager || !params.id) return;
       setAddingPage(true);
-      setError(null);
+      setOperationError(null);
       try {
         await sessionManager.addPage(params.id, blob, fileName);
         await loadSession();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "ページの追加に失敗しました。");
+        setOperationError(err instanceof Error ? err.message : "ページの追加に失敗しました。");
       } finally {
         setAddingPage(false);
       }
@@ -153,13 +155,13 @@ export function SessionDetailContent() {
   const handleDeletePage = useCallback(async () => {
     if (!sessionManager || !params.id || !deleteTarget) return;
     setDeleting(true);
-    setError(null);
+    setOperationError(null);
     try {
       await sessionManager.removePage(params.id, deleteTarget);
       setDeleteTarget(null);
       await loadSession();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ページの削除に失敗しました。");
+      setOperationError(err instanceof Error ? err.message : "ページの削除に失敗しました。");
     } finally {
       setDeleting(false);
     }
@@ -217,7 +219,7 @@ export function SessionDetailContent() {
     );
   }
 
-  if (error) {
+  if (loadError) {
     return (
       <AppShell>
         <div className="mb-4">
@@ -230,7 +232,7 @@ export function SessionDetailContent() {
         </div>
         <div className="text-center py-12">
           <div className="text-3xl mb-4">⚠️</div>
-          <p className="text-red-600">{error}</p>
+          <p className="text-red-600">{loadError}</p>
         </div>
       </AppShell>
     );
@@ -258,9 +260,9 @@ export function SessionDetailContent() {
         </div>
       </div>
 
-      {error && (
+      {operationError && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {error}
+          {operationError}
         </div>
       )}
 
