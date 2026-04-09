@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { createDriveClient } from "@/lib/drive-client";
 import { SettingsManager } from "@/lib/settings-manager";
 import { IndexManager } from "@/lib/index-manager";
+import { SessionManager } from "@/lib/session-manager";
 import type { Settings, AppIndex } from "@/types/settings";
 
 export type InitializeStatus =
@@ -20,6 +21,7 @@ export type InitializeAppResult = {
   error: Error | null;
   settingsManager: SettingsManager | null;
   indexManager: IndexManager | null;
+  sessionManager: SessionManager | null;
   handleFolderSelected: (folder: { id: string; name: string }) => Promise<void>;
 };
 
@@ -38,6 +40,7 @@ export function useInitializeApp(): InitializeAppResult {
   const [error, setError] = useState<Error | null>(null);
   const [settingsManager, setSettingsManager] = useState<SettingsManager | null>(null);
   const [indexManager, setIndexManager] = useState<IndexManager | null>(null);
+  const [sessionManager, setSessionManager] = useState<SessionManager | null>(null);
 
   const handleFolderSelected = useCallback(
     async (folder: { id: string; name: string }, sm: SettingsManager | null) => {
@@ -74,6 +77,7 @@ export function useInitializeApp(): InitializeAppResult {
       setError(null);
       setSettingsManager(null);
       setIndexManager(null);
+      setSessionManager(null);
       return;
     }
 
@@ -101,6 +105,9 @@ export function useInitializeApp(): InitializeAppResult {
         setIndexManager(im);
         setSettings(loadedSettings);
         setIndex(loadedIndex);
+
+        const sessMgr = new SessionManager(client, sm, im);
+        setSessionManager(sessMgr);
 
         const folderId = loadedSettings.notebookImageFolderId;
         if (!folderId) {
@@ -150,6 +157,7 @@ export function useInitializeApp(): InitializeAppResult {
     error,
     settingsManager,
     indexManager,
+    sessionManager,
     handleFolderSelected: boundHandleFolderSelected,
   };
 }
