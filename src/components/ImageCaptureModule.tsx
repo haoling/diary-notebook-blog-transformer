@@ -102,6 +102,7 @@ export const ImageCaptureModule = ({
       stopCamera();
     } catch (err) {
       setError(err instanceof Error ? err.message : "撮影に失敗しました。");
+      stopCamera();
     } finally {
       setCapturing(false);
     }
