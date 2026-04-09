@@ -46,9 +46,18 @@ export class SessionManager {
   /** セッションID単位でミューテーションを直列化する。 */
   private async runSerialized(sessionId: string, fn: () => Promise<void>): Promise<void> {
     const prev = this.sessionMutationChains.get(sessionId) ?? Promise.resolve();
-    const next = prev.then(fn, fn);
+    let next: Promise<void>;
+    let resolved = false;
+    next = prev.then(() => fn(), () => fn());
+    next.then(
+      () => { resolved = true; },
+      () => { resolved = true; },
+    );
     this.sessionMutationChains.set(sessionId, next);
     await next;
+    if (this.sessionMutationChains.get(sessionId) === next) {
+      this.sessionMutationChains.delete(sessionId);
+    }
   }
 
   /** 手帳画像フォルダ ID を取得する。未設定ならエラー。 */
@@ -89,11 +98,25 @@ export class SessionManager {
     };
 
     await this.saveSession(session);
-    await this.indexManager.addSession({
-      id: session.id,
-      createdAt: session.createdAt,
-      pageCount: 0,
-    });
+
+    try {
+      await this.indexManager.addSession({
+        id: session.id,
+        createdAt: session.createdAt,
+        pageCount: 0,
+      });
+    } catch (indexErr) {
+      try {
+        const fileId = await this.getSessionFileId(session.id);
+        await this.client.deleteFile(fileId);
+      } catch (rollbackErr) {
+        console.warn(
+          `インデックス更新失敗後のセッションファイルロールバックに失敗しました:`,
+          rollbackErr,
+        );
+      }
+      throw indexErr;
+    }
 
     return session;
   }
@@ -210,33 +233,35 @@ export class SessionManager {
 
   /** セッション全体を削除する（ページ画像も Drive から削除）。 */
   async deleteSession(sessionId: string): Promise<void> {
-    let session: ScanSession;
-    try {
-      session = await this.loadSession(sessionId);
-    } catch (err) {
-      if (err instanceof DriveNotFoundError) {
-        await this.indexManager.removeSession(sessionId);
-        return;
-      }
-      throw err;
-    }
-
-    for (const page of session.pages) {
+    await this.runSerialized(sessionId, async () => {
+      let session: ScanSession;
       try {
-        await this.client.deleteFile(page.originalFileId);
+        session = await this.loadSession(sessionId);
       } catch (err) {
-        console.warn(`ページ画像の削除に失敗しました (fileId: ${page.originalFileId}):`, err);
+        if (err instanceof DriveNotFoundError) {
+          await this.indexManager.removeSession(sessionId);
+          return;
+        }
+        throw err;
       }
-    }
 
-    try {
-      const fileId = await this.getSessionFileId(sessionId);
-      await this.client.deleteFile(fileId);
-    } catch (err) {
-      console.warn(`セッションファイルの削除に失敗しました:`, err);
-    }
+      for (const page of session.pages) {
+        try {
+          await this.client.deleteFile(page.originalFileId);
+        } catch (err) {
+          console.warn(`ページ画像の削除に失敗しました (fileId: ${page.originalFileId}):`, err);
+        }
+      }
 
-    await this.indexManager.removeSession(sessionId);
+      try {
+        const fileId = await this.getSessionFileId(sessionId);
+        await this.client.deleteFile(fileId);
+      } catch (err) {
+        console.warn(`セッションファイルの削除に失敗しました:`, err);
+      }
+
+      await this.indexManager.removeSession(sessionId);
+    });
   }
 
   /** appDataFolder 内の全セッションファイルを一覧し、セッションデータを読み込む。 */
