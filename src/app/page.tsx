@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { GoogleLoginButton } from "@/components/GoogleLoginButton";
-import { UserProfile } from "@/components/UserProfile";
 
 function LandingPage() {
   return (
@@ -107,24 +108,21 @@ function LandingPage() {
   );
 }
 
-function AppShell() {
-  return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
-          <span className="text-lg font-bold text-slate-800">📓 DNBT</span>
-          <UserProfile />
-        </div>
-      </header>
-      <div className="max-w-4xl mx-auto px-4 py-16 text-center">
-        <p className="text-lg text-slate-600">ようこそ！準備ができました。</p>
-      </div>
-    </main>
-  );
-}
-
 export default function Home() {
   const { isAuthenticated } = useAuth();
+  const router = useRouter();
 
-  return isAuthenticated ? <AppShell /> : <LandingPage />;
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.replace("/sessions");
+    }
+  }, [isAuthenticated, router]);
+
+  if (isAuthenticated) {
+    return (
+      <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100" />
+    );
+  }
+
+  return <LandingPage />;
 }
