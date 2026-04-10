@@ -11,6 +11,7 @@ export type Settings = {
 export type IndexSessionEntry = {
   id: string;
   createdAt: string;
+  pageCount: number;
 };
 
 /** 写真データの取得元種別。 */

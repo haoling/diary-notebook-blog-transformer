@@ -157,6 +157,24 @@ export class DriveClient {
     return res.json() as Promise<DriveFile>;
   }
 
+  /** appDataFolder のファイルを名前で検索して取得する（内容のダウンロードなし）。 */
+  async findAppDataFileByName(name: string): Promise<DriveFile> {
+    const query = encodeURIComponent(
+      `'appDataFolder' in parents and name = '${escapeDriveQueryValue(name)}' and trashed = false`,
+    );
+    const list = await this.apiFetch<{
+      files?: DriveFile[];
+    }>(`/files?q=${query}&spaces=appDataFolder&fields=files(id,name,kind)`);
+
+    if (!list.files || list.files.length === 0) {
+      throw new DriveNotFoundError(
+        `appDataFolder に '${name}' が見つかりません。`,
+      );
+    }
+
+    return list.files[0];
+  }
+
   /** appDataFolder のファイルを名前で検索して取得する。 */
   async getAppDataFileByName<T extends Record<string, unknown>>(name: string): Promise<T & { _fileId: string; _file: DriveFile }> {
     const query = encodeURIComponent(

@@ -238,7 +238,7 @@ export default function DebugPage() {
     const im = imRef.current;
     if (!im || !imLoaded || !sessionIdInput) return;
     try {
-      await im.addSession({ id: sessionIdInput, createdAt: sessionCreatedInput || new Date().toISOString() });
+      await im.addSession({ id: sessionIdInput, createdAt: sessionCreatedInput || new Date().toISOString(), pageCount: 0 });
       reloadImData();
       addLog(setImLogs, `addSession({ id: "${sessionIdInput}" })`, "success");
       setSessionIdInput("");

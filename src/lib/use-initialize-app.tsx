@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, createContext, useContext } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { createDriveClient } from "@/lib/drive-client";
 import { SettingsManager } from "@/lib/settings-manager";
 import { IndexManager } from "@/lib/index-manager";
+import { SessionManager } from "@/lib/session-manager";
 import type { Settings, AppIndex } from "@/types/settings";
 
 export type InitializeStatus =
@@ -20,17 +21,21 @@ export type InitializeAppResult = {
   error: Error | null;
   settingsManager: SettingsManager | null;
   indexManager: IndexManager | null;
+  sessionManager: SessionManager | null;
   handleFolderSelected: (folder: { id: string; name: string }) => Promise<void>;
 };
 
-/**
- * ログイン後に初期化状態を判定し、必要に応じてフォルダ選択をトリガーする React フック。
- *
- * - 認証完了を検知して SettingsManager / IndexManager を初期化
- * - notebookImageFolderId の有無で ready / needsFolderSelection を判定
- * - フォルダ選択後に settings を更新して ready に遷移
- */
+const InitializeAppContext = createContext<InitializeAppResult | null>(null);
+
 export function useInitializeApp(): InitializeAppResult {
+  const ctx = useContext(InitializeAppContext);
+  if (ctx) return ctx;
+
+  // Context プロバイダ外で呼ばれた場合は従来通り独立インスタンスを返す
+  return useInitializeAppImpl();
+}
+
+function useInitializeAppImpl(): InitializeAppResult {
   const { accessToken, isAuthenticated } = useAuth();
   const [status, setStatus] = useState<InitializeStatus>("loading");
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -38,6 +43,7 @@ export function useInitializeApp(): InitializeAppResult {
   const [error, setError] = useState<Error | null>(null);
   const [settingsManager, setSettingsManager] = useState<SettingsManager | null>(null);
   const [indexManager, setIndexManager] = useState<IndexManager | null>(null);
+  const [sessionManager, setSessionManager] = useState<SessionManager | null>(null);
 
   const handleFolderSelected = useCallback(
     async (folder: { id: string; name: string }, sm: SettingsManager | null) => {
@@ -68,12 +74,13 @@ export function useInitializeApp(): InitializeAppResult {
 
   useEffect(() => {
     if (!isAuthenticated || !accessToken) {
-      setStatus("loading");
       setSettings(null);
       setIndex(null);
       setError(null);
       setSettingsManager(null);
       setIndexManager(null);
+      setSessionManager(null);
+      if (status !== "loading") setStatus("loading");
       return;
     }
 
@@ -102,21 +109,16 @@ export function useInitializeApp(): InitializeAppResult {
         setSettings(loadedSettings);
         setIndex(loadedIndex);
 
+        const sessMgr = new SessionManager(client, sm, im);
+        setSessionManager(sessMgr);
+
         const folderId = loadedSettings.notebookImageFolderId;
         if (!folderId) {
           setStatus("needsFolderSelection");
           return;
         }
 
-        // フォルダが実際に存在するか確認
-        const exists = await client.fileExists(folderId);
-        if (cancelled) return;
-
-        if (exists) {
-          setStatus("ready");
-        } else {
-          setStatus("needsFolderSelection");
-        }
+        setStatus("ready");
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -150,6 +152,17 @@ export function useInitializeApp(): InitializeAppResult {
     error,
     settingsManager,
     indexManager,
+    sessionManager,
     handleFolderSelected: boundHandleFolderSelected,
   };
+}
+
+/** 子コンポーネント間で useInitializeApp の状態を共有するプロバイダ。 */
+export function InitializeAppProvider({ children }: { children: React.ReactNode }) {
+  const result = useInitializeAppImpl();
+  return (
+    <InitializeAppContext.Provider value={result}>
+      {children}
+    </InitializeAppContext.Provider>
+  );
 }
