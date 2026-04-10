@@ -1,12 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useParams } from "next/navigation";
-import Link from "next/link";
-import { AppShell } from "@/components/AppShell";
-import { useRequireAuth } from "@/lib/use-require-auth";
-import { useInitializeApp } from "@/lib/use-initialize-app";
 import { useAuth } from "@/lib/auth-context";
+import { useInitializeApp } from "@/lib/use-initialize-app";
 import { createDriveClient } from "@/lib/drive-client";
 import { ImageCaptureModule } from "@/components/ImageCaptureModule";
 import { ScannerUploadModule } from "@/components/ScannerUploadModule";
@@ -98,11 +94,14 @@ function PageThumbnail({ page, accessToken, onDelete }: PageThumbnailProps) {
   );
 }
 
-export function SessionDetailContent() {
-  const { isAuthorized } = useRequireAuth();
-  const params = useParams<{ id: string }>();
+export type SessionDetailPanelProps = {
+  sessionId: string;
+  onBack: () => void;
+};
+
+export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProps) {
   const { accessToken } = useAuth();
-  const { status, sessionManager, error: initError } = useInitializeApp();
+  const { status, sessionManager } = useInitializeApp();
 
   const [session, setSession] = useState<ScanSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -113,12 +112,12 @@ export function SessionDetailContent() {
   const [deleting, setDeleting] = useState(false);
 
   const loadSession = useCallback(async () => {
-    if (!sessionManager || !params.id) return;
+    if (!sessionManager || !sessionId) return;
     setLoading(true);
     setLoadError(null);
     setOperationError(null);
     try {
-      const s = await sessionManager.loadSession(params.id);
+      const s = await sessionManager.loadSession(sessionId);
       setSession(s);
     } catch (err) {
       setLoadError(
@@ -127,7 +126,7 @@ export function SessionDetailContent() {
     } finally {
       setLoading(false);
     }
-  }, [sessionManager, params.id]);
+  }, [sessionManager, sessionId]);
 
   useEffect(() => {
     if (status === "ready" && sessionManager) {
@@ -137,11 +136,11 @@ export function SessionDetailContent() {
 
   const handleCapture = useCallback(
     async (blob: Blob, fileName: string) => {
-      if (!sessionManager || !params.id) return;
+      if (!sessionManager || !sessionId) return;
       setAddingPage(true);
       setOperationError(null);
       try {
-        await sessionManager.addPage(params.id, blob, fileName);
+        await sessionManager.addPage(sessionId, blob, fileName);
         await loadSession();
       } catch (err) {
         setOperationError(err instanceof Error ? err.message : "ページの追加に失敗しました。");
@@ -149,15 +148,15 @@ export function SessionDetailContent() {
         setAddingPage(false);
       }
     },
-    [sessionManager, params.id, loadSession],
+    [sessionManager, sessionId, loadSession],
   );
 
   const handleDeletePage = useCallback(async () => {
-    if (!sessionManager || !params.id || !deleteTarget) return;
+    if (!sessionManager || !sessionId || !deleteTarget) return;
     setDeleting(true);
     setOperationError(null);
     try {
-      await sessionManager.removePage(params.id, deleteTarget);
+      await sessionManager.removePage(sessionId, deleteTarget);
       setDeleteTarget(null);
       await loadSession();
     } catch (err) {
@@ -165,91 +164,54 @@ export function SessionDetailContent() {
     } finally {
       setDeleting(false);
     }
-  }, [sessionManager, params.id, deleteTarget, loadSession]);
-
-  if (!isAuthorized) return null;
+  }, [sessionManager, sessionId, deleteTarget, loadSession]);
 
   if (status === "loading" || (status === "ready" && loading)) {
     return (
-      <AppShell>
+      <div>
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 mb-4"
+        >
+          ← セッション一覧に戻る
+        </button>
         <div className="flex items-center justify-center py-12">
           <div className="text-slate-400">読み込み中...</div>
         </div>
-      </AppShell>
-    );
-  }
-
-  if (status === "needsFolderSelection") {
-    return (
-      <AppShell>
-        <div className="mb-4">
-          <Link
-            href="/sessions"
-            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
-          >
-            ← セッション一覧に戻る
-          </Link>
-        </div>
-        <div className="text-center py-12">
-          <div className="text-3xl mb-4">📁</div>
-          <p className="text-slate-800 mb-2">手帳画像フォルダの設定が必要です</p>
-          <p className="text-sm text-slate-500 mb-6">
-            フォルダが未設定、または設定済みフォルダにアクセスできません。セッション操作を続けるには設定を確認してください。
-          </p>
-          <Link
-            href="/settings"
-            className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            設定画面へ
-          </Link>
-        </div>
-      </AppShell>
-    );
-  }
-
-  if (status === "error" && initError) {
-    return (
-      <AppShell>
-        <div className="text-center py-12">
-          <div className="text-3xl mb-4">⚠️</div>
-          <p className="text-red-600 mb-2">初期化に失敗しました</p>
-          <p className="text-sm text-slate-500">{initError.message}</p>
-        </div>
-      </AppShell>
+      </div>
     );
   }
 
   if (loadError) {
     return (
-      <AppShell>
-        <div className="mb-4">
-          <Link
-            href="/sessions"
-            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
-          >
-            ← セッション一覧に戻る
-          </Link>
-        </div>
+      <div>
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 mb-4"
+        >
+          ← セッション一覧に戻る
+        </button>
         <div className="text-center py-12">
           <div className="text-3xl mb-4">⚠️</div>
           <p className="text-red-600">{loadError}</p>
         </div>
-      </AppShell>
+      </div>
     );
   }
 
   if (!session) return null;
 
   return (
-    <AppShell>
-      <div className="mb-4">
-        <Link
-          href="/sessions"
-          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
-        >
-          ← セッション一覧に戻る
-        </Link>
-      </div>
+    <div>
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 mb-4"
+      >
+        ← セッション一覧に戻る
+      </button>
 
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -316,6 +278,6 @@ export function SessionDetailContent() {
         onConfirm={handleDeletePage}
         onCancel={() => setDeleteTarget(null)}
       />
-    </AppShell>
+    </div>
   );
 }
