@@ -62,12 +62,17 @@ function loadPersistedAuth(): PersistedAuth | null {
   const expiresAt = sessionStorage.getItem(STORAGE_KEY_EXPIRES_AT);
   const userInfo = sessionStorage.getItem(STORAGE_KEY_USER);
   if (!token || !expiresAt || !userInfo) return null;
-  if (Date.now() >= Number(expiresAt)) {
+  const parsedExpiresAt = Number(expiresAt);
+  if (!Number.isFinite(parsedExpiresAt)) {
+    clearPersistedAuth();
+    return null;
+  }
+  if (Date.now() >= parsedExpiresAt) {
     clearPersistedAuth();
     return null;
   }
   try {
-    return { token, expiresAt: Number(expiresAt), userInfo: JSON.parse(userInfo) };
+    return { token, expiresAt: parsedExpiresAt, userInfo: JSON.parse(userInfo) };
   } catch {
     clearPersistedAuth();
     return null;
@@ -94,14 +99,12 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         isRestoring: false,
       };
     case "LOGIN":
-      persistAuth(action.payload.token, action.payload.expiresIn, action.payload.userInfo);
       return {
         user: action.payload.userInfo,
         accessToken: action.payload.token,
         isRestoring: false,
       };
     case "CLEAR":
-      clearPersistedAuth();
       return { user: null, accessToken: null, isRestoring: false };
   }
 }
@@ -118,6 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearAuth = useCallback(() => {
     googleLogout();
+    clearPersistedAuth();
     dispatch({ type: "CLEAR" });
     if (expireTimer.current) {
       clearTimeout(expireTimer.current);
@@ -158,13 +162,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onSuccess: async (tokenResponse) => {
       try {
         const token = tokenResponse.access_token;
+        const expiresIn = tokenResponse.expires_in ?? 3600;
         const userInfo = await fetchUserInfo(token);
+        persistAuth(token, expiresIn, userInfo);
         dispatch({
           type: "LOGIN",
-          payload: { token, expiresIn: tokenResponse.expires_in ?? 3600, userInfo },
+          payload: { token, expiresIn, userInfo },
         });
         if (expireTimer.current) clearTimeout(expireTimer.current);
-        const expiresInMs = (tokenResponse.expires_in ?? 3600) * 1000;
+        const expiresInMs = expiresIn * 1000;
         const buffer = 60_000;
         const logoutDelayMs = Math.max(0, expiresInMs - buffer);
         expireTimer.current = setTimeout(clearAuth, logoutDelayMs);
