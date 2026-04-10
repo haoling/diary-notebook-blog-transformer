@@ -307,11 +307,14 @@ export function PerspectiveCorrectionUI({
     [imageSize],
   );
 
+  const capturedElementRef = useRef<HTMLElement | null>(null);
+
   const handlePointerDown = useCallback(
     (corner: CornerKey) => (e: React.PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
       e.currentTarget.setPointerCapture(e.pointerId);
+      capturedElementRef.current = e.currentTarget;
       setDraggingCorner(corner);
       updateCornerFromPointer(e.clientX, e.clientY, corner);
     },
@@ -327,7 +330,10 @@ export function PerspectiveCorrectionUI({
   );
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (capturedElementRef.current) {
+      capturedElementRef.current.releasePointerCapture(e.pointerId);
+      capturedElementRef.current = null;
+    }
     setDraggingCorner(null);
   }, []);
 

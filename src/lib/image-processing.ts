@@ -95,9 +95,16 @@ export async function loadOpenCV(): Promise<OpenCV> {
 
     const g = globalThis as Record<string, unknown>;
     if (g.cv && typeof (g.cv as OpenCV).Mat === "function") {
-      cvInstance = g.cv as OpenCV;
-      resolve(cvInstance);
-      return;
+      const cv = g.cv as OpenCV;
+      try {
+        const testMat = new cv.Mat();
+        testMat.delete();
+        cvInstance = cv;
+        resolve(cvInstance);
+        return;
+      } catch {
+        // WASM 初期化未完了：script ロード経路でポーリングする
+      }
     }
 
     const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -164,11 +171,9 @@ export async function loadOpenCV(): Promise<OpenCV> {
   return cvPromise;
 }
 
-/** OpenCV.js がすでにロード済みかどうかを返す。 */
+/** OpenCV.js がすでにロード・初期化済みかどうかを返す。 */
 export function isOpencvLoaded(): boolean {
-  if (cvInstance) return true;
-  const g = globalThis as Record<string, unknown>;
-  return !!(g.cv && typeof (g.cv as OpenCV).Mat === "function");
+  return cvInstance !== null;
 }
 
 // ---------------------------------------------------------------------------
