@@ -59,7 +59,7 @@ export default function SessionsPage() {
     try {
       const session = await sessionManager.createSession();
       refreshSessions();
-      window.location.href = `/sessions/${session.id}`;
+      window.location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/sessions/${session.id}`;
     } catch (err) {
       console.error("セッション作成に失敗しました:", err);
     } finally {
@@ -154,7 +154,7 @@ export default function SessionsPage() {
             >
               <button
                 type="button"
-                onClick={() => { window.location.href = `/sessions/${session.id}`; }}
+                onClick={() => { window.location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/sessions/${session.id}`; }}
                 className="flex-1 min-w-0 hover:opacity-80 transition-opacity text-left"
               >
                 <div className="flex items-center gap-3">
