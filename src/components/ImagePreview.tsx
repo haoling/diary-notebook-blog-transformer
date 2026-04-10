@@ -33,10 +33,11 @@ export function ImagePreview({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const pendingCorrection = useRef<CorrectionResult | undefined>(correction);
   const renderQueued = useRef(false);
+  const renderIdRef = useRef(0);
 
   /** 画像を読み込み、補正を適用して Canvas に描画する。 */
   const renderToCanvas = useCallback(
-    async (img: HTMLImageElement, corr?: CorrectionResult) => {
+    async (img: HTMLImageElement, corr?: CorrectionResult, renderId?: number) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
@@ -57,6 +58,9 @@ export function ImagePreview({
           resultCanvas = c;
         }
 
+        // 古いリクエストの結果は破棄
+        if (renderId !== undefined && renderId !== renderIdRef.current) return;
+
         let drawW = resultCanvas.width;
         let drawH = resultCanvas.height;
 
@@ -73,6 +77,7 @@ export function ImagePreview({
 
         setStatus("ready");
       } catch (err) {
+        if (renderId !== undefined && renderId !== renderIdRef.current) return;
         setStatus("error");
         setErrorMsg(err instanceof Error ? err.message : "画像の描画に失敗しました。");
       }
@@ -90,7 +95,8 @@ export function ImagePreview({
       if (cancelled) return;
       imageRef.current = img;
       pendingCorrection.current = correction;
-      renderToCanvas(img, correction);
+      const renderId = ++renderIdRef.current;
+      renderToCanvas(img, correction, renderId);
     });
 
     img.addEventListener("error", () => {
@@ -118,11 +124,12 @@ export function ImagePreview({
     if (status === "ready" || status === "error") {
       pendingCorrection.current = correction;
       renderQueued.current = true;
+      const renderId = ++renderIdRef.current;
       // マイクロタスクでキューイングして連続更新をデバウンス
       queueMicrotask(() => {
         renderQueued.current = false;
         if (imageRef.current) {
-          renderToCanvas(imageRef.current, pendingCorrection.current);
+          renderToCanvas(imageRef.current, pendingCorrection.current, renderId);
         }
       });
     }

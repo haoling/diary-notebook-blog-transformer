@@ -160,7 +160,7 @@ function SliderControl({
       <button
         type="button"
         onClick={onReset}
-        disabled={value === (min + max) / 2 || (min < 0 && value === 0)}
+        disabled={value === 0}
         className="text-xs text-slate-400 hover:text-slate-600 disabled:opacity-30"
         aria-label={`${label}をリセット`}
       >
@@ -290,10 +290,10 @@ export function PerspectiveCorrectionUI({
 
       const rect = img.getBoundingClientRect();
       const x = Math.round(
-        Math.max(0, Math.min(imageSize.width, ((clientX - rect.left) / rect.width) * imageSize.width)),
+        Math.max(0, Math.min(imageSize.width - 1, ((clientX - rect.left) / rect.width) * imageSize.width)),
       );
       const y = Math.round(
-        Math.max(0, Math.min(imageSize.height, ((clientY - rect.top) / rect.height) * imageSize.height)),
+        Math.max(0, Math.min(imageSize.height - 1, ((clientY - rect.top) / rect.height) * imageSize.height)),
       );
 
       setPerspective((prev) => {
@@ -311,7 +311,7 @@ export function PerspectiveCorrectionUI({
     (corner: CornerKey) => (e: React.PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      e.currentTarget.setPointerCapture(e.pointerId);
       setDraggingCorner(corner);
       updateCornerFromPointer(e.clientX, e.clientY, corner);
     },
@@ -333,6 +333,7 @@ export function PerspectiveCorrectionUI({
   // ---- プレビューのデバウンス更新 ----
 
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewRequestIdRef = useRef(0);
 
   useEffect(() => {
     if (!imageUrl || !imageSize) return;
@@ -348,6 +349,7 @@ export function PerspectiveCorrectionUI({
     }
 
     setPreviewLoading(true);
+    const requestId = ++previewRequestIdRef.current;
     previewTimerRef.current = setTimeout(async () => {
       try {
         const img = new Image();
@@ -376,6 +378,9 @@ export function PerspectiveCorrectionUI({
 
         const resultCanvas = await applyCorrections(img, correction);
 
+        // 古いリクエストの結果は破棄
+        if (requestId !== previewRequestIdRef.current) return;
+
         const blob = await new Promise<Blob>((resolve, reject) => {
           resultCanvas.toBlob(
             (b) => (b ? resolve(b) : reject(new Error("プレビュー画像の生成に失敗しました。"))),
@@ -383,12 +388,18 @@ export function PerspectiveCorrectionUI({
           );
         });
 
+        if (requestId !== previewRequestIdRef.current) return;
+
         const url = URL.createObjectURL(blob);
         setPreviewUrl(url);
       } catch (err) {
-        console.error("プレビューの生成に失敗しました:", err);
+        if (requestId === previewRequestIdRef.current) {
+          console.error("プレビューの生成に失敗しました:", err);
+        }
       } finally {
-        setPreviewLoading(false);
+        if (requestId === previewRequestIdRef.current) {
+          setPreviewLoading(false);
+        }
       }
     }, 300);
 

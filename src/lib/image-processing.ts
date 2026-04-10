@@ -105,26 +105,45 @@ export async function loadOpenCV(): Promise<OpenCV> {
     script.src = `${basePath}/opencv.js`;
     script.async = true;
 
+    let isPolling = false;
+    let pollFrameId: number | null = null;
+    const stopPolling = () => {
+      isPolling = false;
+      if (pollFrameId !== null) {
+        cancelAnimationFrame(pollFrameId);
+        pollFrameId = null;
+      }
+    };
+
     const timeout = setTimeout(() => {
+      stopPolling();
       cvPromise = null;
       reject(new Error("OpenCV.js の読み込みがタイムアウトしました。ネットワーク接続を確認してください。"));
     }, 120_000);
 
     script.addEventListener("load", () => {
+      isPolling = true;
+
       const poll = () => {
+        if (!isPolling) return;
+
         const cv = (globalThis as Record<string, unknown>).cv as OpenCV | undefined;
         if (cv?.Mat) {
+          stopPolling();
           clearTimeout(timeout);
           cvInstance = cv;
           resolve(cv);
           return;
         }
-        requestAnimationFrame(poll);
+
+        pollFrameId = requestAnimationFrame(poll);
       };
+
       poll();
     });
 
     script.addEventListener("error", () => {
+      stopPolling();
       clearTimeout(timeout);
       cvPromise = null;
       reject(new Error("OpenCV.js の読み込みに失敗しました。"));
@@ -202,7 +221,7 @@ export async function applyPerspectiveCorrection(
     params.bottomRight.x - params.bottomLeft.x,
     params.bottomRight.y - params.bottomLeft.y,
   );
-  const maxWidth = Math.round(Math.max(topWidth, bottomWidth));
+  const maxWidth = Math.max(1, Math.round(Math.max(topWidth, bottomWidth)));
 
   const leftHeight = Math.hypot(
     params.bottomLeft.x - params.topLeft.x,
@@ -212,7 +231,7 @@ export async function applyPerspectiveCorrection(
     params.bottomRight.x - params.topRight.x,
     params.bottomRight.y - params.topRight.y,
   );
-  const maxHeight = Math.round(Math.max(leftHeight, rightHeight));
+  const maxHeight = Math.max(1, Math.round(Math.max(leftHeight, rightHeight)));
 
   const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
     0, 0,
