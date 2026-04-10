@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 import {
   useState,
   useRef,
@@ -284,9 +285,8 @@ export function PerspectiveCorrectionUI({
 
   const updateCornerFromPointer = useCallback(
     (clientX: number, clientY: number, corner: CornerKey) => {
-      const container = containerRef.current;
       const img = imageRef.current;
-      if (!container || !img || !imageSize) return;
+      if (!img || !imageSize) return;
 
       const rect = img.getBoundingClientRect();
       const x = Math.round(
