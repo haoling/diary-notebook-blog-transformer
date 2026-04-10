@@ -118,22 +118,20 @@ export function ImagePreview({
   /** 補正パラメータの変更時に再描画する。 */
   useEffect(() => {
     const img = imageRef.current;
-    if (!img || renderQueued.current) return;
+    if (!img) return;
 
-    // 画像ロード完了後に correction が設定された場合
-    if (status === "ready" || status === "error") {
-      pendingCorrection.current = correction;
-      renderQueued.current = true;
-      const renderId = ++renderIdRef.current;
-      // マイクロタスクでキューイングして連続更新をデバウンス
-      queueMicrotask(() => {
-        renderQueued.current = false;
-        if (imageRef.current) {
-          renderToCanvas(imageRef.current, pendingCorrection.current, renderId);
-        }
-      });
-    }
-  }, [correction, status, renderToCanvas]);
+    pendingCorrection.current = correction;
+    if (renderQueued.current) return;
+
+    renderQueued.current = true;
+    const renderId = ++renderIdRef.current;
+    queueMicrotask(() => {
+      renderQueued.current = false;
+      if (imageRef.current) {
+        renderToCanvas(imageRef.current, pendingCorrection.current, renderId);
+      }
+    });
+  }, [correction, renderToCanvas]);
 
   return (
     <div className={`relative ${className ?? ""}`}>

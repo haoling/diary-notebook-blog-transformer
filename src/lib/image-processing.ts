@@ -129,6 +129,16 @@ export async function loadOpenCV(): Promise<OpenCV> {
 
         const cv = (globalThis as Record<string, unknown>).cv as OpenCV | undefined;
         if (cv?.Mat) {
+          // WASM ランタイムの初期化完了も待つ
+          if (cv.Mat.empty) {
+            try {
+              new cv.Mat().delete();
+            } catch {
+              // 初期化未完了：ポーリングを継続
+              pollFrameId = requestAnimationFrame(poll);
+              return;
+            }
+          }
           stopPolling();
           clearTimeout(timeout);
           cvInstance = cv;
@@ -203,59 +213,67 @@ export async function applyPerspectiveCorrection(
   const cv = await loadOpenCV();
 
   const srcCanvas = imageToCanvas(source);
-  const src = cv.imread(srcCanvas);
-  const dst = new cv.Mat();
+  let src: OpenCV.Mat | null = null;
+  let dst: OpenCV.Mat | null = null;
+  let srcPts: OpenCV.Mat | null = null;
+  let dstPts: OpenCV.Mat | null = null;
+  let M: OpenCV.Mat | null = null;
 
-  const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-    params.topLeft.x, params.topLeft.y,
-    params.topRight.x, params.topRight.y,
-    params.bottomRight.x, params.bottomRight.y,
-    params.bottomLeft.x, params.bottomLeft.y,
-  ]);
+  try {
+    src = cv.imread(srcCanvas);
+    dst = new cv.Mat();
 
-  const topWidth = Math.hypot(
-    params.topRight.x - params.topLeft.x,
-    params.topRight.y - params.topLeft.y,
-  );
-  const bottomWidth = Math.hypot(
-    params.bottomRight.x - params.bottomLeft.x,
-    params.bottomRight.y - params.bottomLeft.y,
-  );
-  const maxWidth = Math.max(1, Math.round(Math.max(topWidth, bottomWidth)));
+    srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      params.topLeft.x, params.topLeft.y,
+      params.topRight.x, params.topRight.y,
+      params.bottomRight.x, params.bottomRight.y,
+      params.bottomLeft.x, params.bottomLeft.y,
+    ]);
 
-  const leftHeight = Math.hypot(
-    params.bottomLeft.x - params.topLeft.x,
-    params.bottomLeft.y - params.topLeft.y,
-  );
-  const rightHeight = Math.hypot(
-    params.bottomRight.x - params.topRight.x,
-    params.bottomRight.y - params.topRight.y,
-  );
-  const maxHeight = Math.max(1, Math.round(Math.max(leftHeight, rightHeight)));
+    const topWidth = Math.hypot(
+      params.topRight.x - params.topLeft.x,
+      params.topRight.y - params.topLeft.y,
+    );
+    const bottomWidth = Math.hypot(
+      params.bottomRight.x - params.bottomLeft.x,
+      params.bottomRight.y - params.bottomLeft.y,
+    );
+    const maxWidth = Math.max(1, Math.round(Math.max(topWidth, bottomWidth)));
 
-  const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-    0, 0,
-    maxWidth, 0,
-    maxWidth, maxHeight,
-    0, maxHeight,
-  ]);
+    const leftHeight = Math.hypot(
+      params.bottomLeft.x - params.topLeft.x,
+      params.bottomLeft.y - params.topLeft.y,
+    );
+    const rightHeight = Math.hypot(
+      params.bottomRight.x - params.topRight.x,
+      params.bottomRight.y - params.topRight.y,
+    );
+    const maxHeight = Math.max(1, Math.round(Math.max(leftHeight, rightHeight)));
 
-  const M = cv.getPerspectiveTransform(srcPts, dstPts);
-  const dsize = new cv.Size(maxWidth, maxHeight);
-  cv.warpPerspective(src, dst, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 0));
+    dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+      0, 0,
+      maxWidth, 0,
+      maxWidth, maxHeight,
+      0, maxHeight,
+    ]);
 
-  const resultCanvas = document.createElement("canvas");
-  resultCanvas.width = maxWidth;
-  resultCanvas.height = maxHeight;
-  cv.imshow(resultCanvas, dst);
+    M = cv.getPerspectiveTransform(srcPts, dstPts);
+    const dsize = new cv.Size(maxWidth, maxHeight);
+    cv.warpPerspective(src, dst, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 0));
 
-  src.delete();
-  dst.delete();
-  srcPts.delete();
-  dstPts.delete();
-  M.delete();
+    const resultCanvas = document.createElement("canvas");
+    resultCanvas.width = maxWidth;
+    resultCanvas.height = maxHeight;
+    cv.imshow(resultCanvas, dst);
 
-  return resultCanvas;
+    return resultCanvas;
+  } finally {
+    M?.delete();
+    dstPts?.delete();
+    srcPts?.delete();
+    dst?.delete();
+    src?.delete();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -436,7 +454,7 @@ export async function applyCorrections(
     current = applySharpen(current, sharpness);
   }
 
-  return imageToCanvas(current);
+  return current instanceof HTMLCanvasElement ? current : imageToCanvas(current);
 }
 
 // ---------------------------------------------------------------------------
@@ -454,10 +472,12 @@ export function createDefaultPerspectiveParams(
 ): PerspectiveParams {
   const mx = Math.round(imageWidth * marginRatio);
   const my = Math.round(imageHeight * marginRatio);
+  const maxX = Math.max(0, imageWidth - 1);
+  const maxY = Math.max(0, imageHeight - 1);
   return {
-    topLeft: { x: mx, y: my },
-    topRight: { x: imageWidth - mx, y: my },
-    bottomRight: { x: imageWidth - mx, y: imageHeight - my },
-    bottomLeft: { x: mx, y: imageHeight - my },
+    topLeft: { x: Math.min(Math.max(mx, 0), maxX), y: Math.min(Math.max(my, 0), maxY) },
+    topRight: { x: Math.min(Math.max(maxX - mx, 0), maxX), y: Math.min(Math.max(my, 0), maxY) },
+    bottomRight: { x: Math.min(Math.max(maxX - mx, 0), maxX), y: Math.min(Math.max(maxY - my, 0), maxY) },
+    bottomLeft: { x: Math.min(Math.max(mx, 0), maxX), y: Math.min(Math.max(maxY - my, 0), maxY) },
   };
 }
