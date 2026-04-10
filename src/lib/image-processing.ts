@@ -94,7 +94,9 @@ export async function loadOpenCV(): Promise<OpenCV> {
     }
 
     const g = globalThis as Record<string, unknown>;
+    let cvAlreadyExists = false;
     if (g.cv && typeof (g.cv as OpenCV).Mat === "function") {
+      cvAlreadyExists = true;
       const cv = g.cv as OpenCV;
       try {
         const testMat = new cv.Mat();
@@ -103,14 +105,11 @@ export async function loadOpenCV(): Promise<OpenCV> {
         resolve(cvInstance);
         return;
       } catch {
-        // WASM 初期化未完了：script ロード経路でポーリングする
+        // WASM 初期化未完了：ポーリングで待機
       }
     }
 
     const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-    const script = document.createElement("script");
-    script.src = `${basePath}/opencv.js`;
-    script.async = true;
 
     let isPolling = false;
     let pollFrameId: number | null = null;
@@ -127,6 +126,36 @@ export async function loadOpenCV(): Promise<OpenCV> {
       cvPromise = null;
       reject(new Error("OpenCV.js の読み込みがタイムアウトしました。ネットワーク接続を確認してください。"));
     }, 120_000);
+
+    if (cvAlreadyExists) {
+      // script は既に読み込み済み。ポーリングのみ開始
+      isPolling = true;
+      const poll = () => {
+        if (!isPolling) return;
+        const cv = (globalThis as Record<string, unknown>).cv as OpenCV | undefined;
+        if (cv?.Mat) {
+          try {
+            const testMat = new cv.Mat();
+            testMat.delete();
+          } catch {
+            pollFrameId = requestAnimationFrame(poll);
+            return;
+          }
+          stopPolling();
+          clearTimeout(timeout);
+          cvInstance = cv;
+          resolve(cv);
+          return;
+        }
+        pollFrameId = requestAnimationFrame(poll);
+      };
+      poll();
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = `${basePath}/opencv.js`;
+    script.async = true;
 
     script.addEventListener("load", () => {
       isPolling = true;

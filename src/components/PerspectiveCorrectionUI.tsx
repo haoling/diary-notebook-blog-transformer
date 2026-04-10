@@ -414,6 +414,7 @@ export function PerspectiveCorrectionUI({
       if (previewTimerRef.current) {
         clearTimeout(previewTimerRef.current);
       }
+      previewRequestIdRef.current = -1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrl, imageSize, usePerspective, perspective, rotation, brightness, contrast, sharpness]);

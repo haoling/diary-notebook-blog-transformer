@@ -110,6 +110,7 @@ export function ImagePreview({
     return () => {
       cancelled = true;
       imageRef.current = null;
+      renderIdRef.current = -1;
     };
     // src の変更時のみ画像を再ロード。correction の変更は別の effect で処理。
     // eslint-disable-next-line react-hooks/exhaustive-deps
