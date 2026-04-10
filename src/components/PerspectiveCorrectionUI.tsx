@@ -326,7 +326,8 @@ export function PerspectiveCorrectionUI({
     [draggingCorner, updateCornerFromPointer],
   );
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    e.currentTarget.releasePointerCapture(e.pointerId);
     setDraggingCorner(null);
   }, []);
 

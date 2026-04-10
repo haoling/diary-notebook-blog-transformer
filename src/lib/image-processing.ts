@@ -129,15 +129,14 @@ export async function loadOpenCV(): Promise<OpenCV> {
 
         const cv = (globalThis as Record<string, unknown>).cv as OpenCV | undefined;
         if (cv?.Mat) {
-          // WASM ランタイムの初期化完了も待つ
-          if (cv.Mat.empty) {
-            try {
-              new cv.Mat().delete();
-            } catch {
-              // 初期化未完了：ポーリングを継続
-              pollFrameId = requestAnimationFrame(poll);
-              return;
-            }
+          // WASM ランタイムの初期化完了を確認するため Mat 生成を試みる
+          try {
+            const testMat = new cv.Mat();
+            testMat.delete();
+          } catch {
+            // 初期化未完了：ポーリングを継続
+            pollFrameId = requestAnimationFrame(poll);
+            return;
           }
           stopPolling();
           clearTimeout(timeout);
