@@ -1,209 +1,123 @@
 /**
  * 画像補正モジュール。
  *
- * OpenCV.js (WASM) を動的ロードし、台形補正・回転・明るさ/コントラスト/シャープネス調整を
- * ブラウザ内で実行する。補正結果は画像ファイルとして生成せずパラメータのみを保持し、
+ * OpenCV.js (WASM) のロード・初期化・台形補正を Web Worker で実行し、
+ * メインスレッドのフリーズを防止する。回転・明るさ/コントラスト/シャープネスは
+ * 引き続きメインスレッドで Canvas API を使用。
+ *
+ * 補正結果は画像ファイルとして生成せずパラメータのみを保持し、
  * 表示時に Canvas API で適用する方針に従う。
  */
 
 import type { CorrectionResult, PerspectiveParams } from "@/types/scan";
 
 // ---------------------------------------------------------------------------
-// OpenCV.js 型定義（必要な部分のみ）
+// OpenCV Web Worker 通信
 // ---------------------------------------------------------------------------
 
-/** OpenCV.js のブラウザグローバルオブジェクトの型。 */
-export type OpenCV = {
-  Mat: new () => OpenCV.Mat;
-  Size: new (width: number, height: number) => { width: number; height: number };
-  Scalar: new (...vals: number[]) => number[];
-  CV_32FC2: number;
-  INTER_LINEAR: number;
-  BORDER_CONSTANT: number;
-  matFromArray(rows: number, cols: number, type: number, array: number[]): OpenCV.Mat;
-  imread(imageSource: HTMLCanvasElement | HTMLImageElement): OpenCV.Mat;
-  imshow(canvasSource: HTMLCanvasElement | string, mat: OpenCV.Mat): void;
-  getPerspectiveTransform(src: OpenCV.Mat, dst: OpenCV.Mat): OpenCV.Mat;
-  warpPerspective(
-    src: OpenCV.Mat,
-    dst: OpenCV.Mat,
-    M: OpenCV.Mat,
-    dsize: { width: number; height: number },
-    flags?: number,
-    borderMode?: number,
-    borderValue?: number[],
-  ): void;
-  getRotationMatrix2D(
-    center: { x: number; y: number },
-    angle: number,
-    scale: number,
-  ): OpenCV.Mat;
-  warpAffine(
-    src: OpenCV.Mat,
-    dst: OpenCV.Mat,
-    M: OpenCV.Mat,
-    dsize: { width: number; height: number },
-    flags?: number,
-  ): void;
-  GaussianBlur(
-    src: OpenCV.Mat,
-    dst: OpenCV.Mat,
-    ksize: { width: number; height: number },
-    sigmaX: number,
-  ): void;
-  addWeighted(
-    src1: OpenCV.Mat,
-    alpha: number,
-    src2: OpenCV.Mat,
-    beta: number,
-    gamma: number,
-    dst: OpenCV.Mat,
-  ): void;
+type WorkerImageData = {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
 };
 
-export namespace OpenCV {
-  export type Mat = {
-    rows: number;
-    cols: number;
-    data: Uint8Array;
-    type(): number;
-    delete(): void;
-  };
+type WorkerStatus = "idle" | "loading" | "ready" | "error";
+
+let worker: Worker | null = null;
+let workerStatus: WorkerStatus = "idle";
+let workerInitPromise: Promise<void> | null = null;
+const statusListeners = new Set<(status: WorkerStatus) => void>();
+
+function getBasePath(): string {
+  return process.env.NEXT_PUBLIC_BASE_PATH || "";
 }
 
-// ---------------------------------------------------------------------------
-// OpenCV.js ローダー
-// ---------------------------------------------------------------------------
-
-let cvPromise: Promise<OpenCV> | null = null;
-let cvInstance: OpenCV | null = null;
-
-/**
- * OpenCV.js (WASM) を動的にロードして初期化する。
- * public/opencv.js を script タグで読み込み、WASM の初期化完了を待つ。
- * 一度ロードされたらキャッシュされ、以降の呼び出しは即座に解決される。
- */
-export async function loadOpenCV(): Promise<OpenCV> {
-  if (cvInstance) return cvInstance;
-  if (cvPromise) return cvPromise;
-
-  cvPromise = new Promise<OpenCV>((resolve, reject) => {
-    if (typeof document === "undefined") {
-      reject(new Error("OpenCV.js はブラウザ環境でのみ使用できます。"));
-      return;
-    }
-
-    const g = globalThis as Record<string, unknown>;
-    let cvAlreadyExists = false;
-    if (g.cv && typeof (g.cv as OpenCV).Mat === "function") {
-      cvAlreadyExists = true;
-      const cv = g.cv as OpenCV;
-      try {
-        const testMat = new cv.Mat();
-        testMat.delete();
-        cvInstance = cv;
-        resolve(cvInstance);
-        return;
-      } catch {
-        // WASM 初期化未完了：ポーリングで待機
-      }
-    }
-
-    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-
-    let isPolling = false;
-    let pollFrameId: number | null = null;
-    const stopPolling = () => {
-      isPolling = false;
-      if (pollFrameId !== null) {
-        cancelAnimationFrame(pollFrameId);
-        pollFrameId = null;
+function ensureWorker(): Worker {
+  if (!worker) {
+    const basePath = getBasePath();
+    worker = new Worker(`${basePath}/opencv-worker.js`);
+    worker.onmessage = (e) => {
+      const msg = e.data;
+      if (msg.type === "loading") {
+        updateStatus("loading");
+      } else if (msg.type === "ready") {
+        updateStatus("ready");
+      } else if (msg.type === "error") {
+        if (msg.id) {
+          // 個別タスクのエラーは initOpenCV の reject で処理
+        }
+        updateStatus("error");
       }
     };
+    worker.onerror = () => {
+      updateStatus("error");
+    };
+  }
+  return worker;
+}
+
+function updateStatus(status: WorkerStatus) {
+  workerStatus = status;
+  statusListeners.forEach((listener) => listener(status));
+}
+
+/**
+ * OpenCV.js を Web Worker で初期化する。
+ * 一度初期化されたらキャッシュされ、以降の呼び出しは即座に解決される。
+ */
+export async function initOpenCV(): Promise<void> {
+  if (workerStatus === "ready") return;
+  if (workerInitPromise) return workerInitPromise;
+
+  workerInitPromise = new Promise<void>((resolve, reject) => {
+    const w = ensureWorker();
 
     const timeout = setTimeout(() => {
-      stopPolling();
-      cvPromise = null;
+      workerInitPromise = null;
       reject(new Error("OpenCV.js の読み込みがタイムアウトしました。ネットワーク接続を確認してください。"));
     }, 120_000);
 
-    if (cvAlreadyExists) {
-      // script は既に読み込み済み。ポーリングのみ開始
-      isPolling = true;
-      const poll = () => {
-        if (!isPolling) return;
-        const cv = (globalThis as Record<string, unknown>).cv as OpenCV | undefined;
-        if (cv?.Mat) {
-          try {
-            const testMat = new cv.Mat();
-            testMat.delete();
-          } catch {
-            pollFrameId = requestAnimationFrame(poll);
-            return;
-          }
-          stopPolling();
-          clearTimeout(timeout);
-          cvInstance = cv;
-          resolve(cv);
-          return;
-        }
-        pollFrameId = requestAnimationFrame(poll);
-      };
-      poll();
-      return;
-    }
+    const originalOnMessage = w.onmessage;
+    w.onmessage = (e) => {
+      // ステータス更新メッセージは元のハンドラに委譲
+      originalOnMessage?.call(w, e);
+      if (e.data.type === "ready") {
+        clearTimeout(timeout);
+        resolve();
+      } else if (e.data.type === "error" && !e.data.id) {
+        clearTimeout(timeout);
+        workerInitPromise = null;
+        reject(new Error(e.data.error));
+      }
+    };
 
-    const script = document.createElement("script");
-    script.src = `${basePath}/opencv.js`;
-    script.async = true;
-
-    script.addEventListener("load", () => {
-      isPolling = true;
-
-      const poll = () => {
-        if (!isPolling) return;
-
-        const cv = (globalThis as Record<string, unknown>).cv as OpenCV | undefined;
-        if (cv?.Mat) {
-          // WASM ランタイムの初期化完了を確認するため Mat 生成を試みる
-          try {
-            const testMat = new cv.Mat();
-            testMat.delete();
-          } catch {
-            // 初期化未完了：ポーリングを継続
-            pollFrameId = requestAnimationFrame(poll);
-            return;
-          }
-          stopPolling();
-          clearTimeout(timeout);
-          cvInstance = cv;
-          resolve(cv);
-          return;
-        }
-
-        pollFrameId = requestAnimationFrame(poll);
-      };
-
-      poll();
-    });
-
-    script.addEventListener("error", () => {
-      stopPolling();
-      clearTimeout(timeout);
-      cvPromise = null;
-      reject(new Error("OpenCV.js の読み込みに失敗しました。"));
-    });
-
-    document.head.appendChild(script);
+    updateStatus("loading");
+    w.postMessage({ type: "init" });
   });
 
-  return cvPromise;
+  return workerInitPromise;
+}
+
+/**
+ * OpenCV.js のステータス変更をリッスンする。
+ * リスナーを削除する関数を返す。
+ */
+export function onOpenCVStatusChange(listener: (status: WorkerStatus) => void): () => void {
+  statusListeners.add(listener);
+  // 現在のステータスを即座に通知
+  listener(workerStatus);
+  return () => {
+    statusListeners.delete(listener);
+  };
 }
 
 /** OpenCV.js がすでにロード・初期化済みかどうかを返す。 */
 export function isOpencvLoaded(): boolean {
-  return cvInstance !== null;
+  return workerStatus === "ready";
 }
+
+/** 下位互換用: loadOpenCV は initOpenCV のエイリアス */
+export const loadOpenCV = initOpenCV;
 
 // ---------------------------------------------------------------------------
 // 画像ソースのユーティリティ
@@ -232,81 +146,100 @@ export function imageToCanvas(source: ImageSource): HTMLCanvasElement {
 }
 
 // ---------------------------------------------------------------------------
-// 台形補正（Perspective Correction）
+// 台形補正（Perspective Correction）— Worker 経由
 // ---------------------------------------------------------------------------
 
+let taskIdCounter = 0;
+const pendingTasks = new Map<
+  string,
+  {
+    resolve: (data: WorkerImageData) => void;
+    reject: (err: Error) => void;
+  }
+>();
+
 /**
- * OpenCV.js を使用して台形補正を適用する。
+ * Web Worker 経由で台形補正を適用する。
+ * メインスレッドではフリーズせず、Worker 上で OpenCV.js が処理を行う。
+ */
+function workerApplyPerspectiveCorrection(
+  imageData: WorkerImageData,
+  params: PerspectiveParams,
+): Promise<WorkerImageData> {
+  return new Promise((resolve, reject) => {
+    const w = ensureWorker();
+    const id = `task-${++taskIdCounter}`;
+
+    pendingTasks.set(id, { resolve, reject });
+
+    // 一時的なメッセージハンドラを設定（結果の受け取り用）
+    const handler = (e: MessageEvent) => {
+      if (e.data.id !== id) return;
+      w.removeEventListener("message", handler);
+
+      const task = pendingTasks.get(id);
+      pendingTasks.delete(id);
+
+      if (!task) return;
+
+      if (e.data.type === "result") {
+        task.resolve(e.data.imageData);
+      } else if (e.data.type === "error") {
+        task.reject(new Error(e.data.error));
+      }
+    };
+    w.addEventListener("message", handler);
+
+    // ImageData のバッファを Transferable として送信（ゼロコピー）
+    const copy = {
+      data: new Uint8ClampedArray(imageData.data),
+      width: imageData.width,
+      height: imageData.height,
+    };
+    w.postMessage(
+      { type: "perspective", id, imageData: copy, params },
+      [copy.data.buffer],
+    );
+  });
+}
+
+/**
+ * Web Worker 上の OpenCV.js を使用して台形補正を適用する。
  * 4隅の座標で定義された四角形領域を矩形に変換する。
  */
 export async function applyPerspectiveCorrection(
   source: ImageSource,
   params: PerspectiveParams,
 ): Promise<HTMLCanvasElement> {
-  const cv = await loadOpenCV();
+  await initOpenCV();
 
+  // 画像ソース → Canvas → ImageData
   const srcCanvas = imageToCanvas(source);
-  let src: OpenCV.Mat | null = null;
-  let dst: OpenCV.Mat | null = null;
-  let srcPts: OpenCV.Mat | null = null;
-  let dstPts: OpenCV.Mat | null = null;
-  let M: OpenCV.Mat | null = null;
+  const ctx = srcCanvas.getContext("2d")!;
+  const imgData = ctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
 
-  try {
-    src = cv.imread(srcCanvas);
-    dst = new cv.Mat();
+  const workerImageData: WorkerImageData = {
+    data: imgData.data,
+    width: imgData.width,
+    height: imgData.height,
+  };
 
-    srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-      params.topLeft.x, params.topLeft.y,
-      params.topRight.x, params.topRight.y,
-      params.bottomRight.x, params.bottomRight.y,
-      params.bottomLeft.x, params.bottomLeft.y,
-    ]);
+  // Worker で台形補正を実行
+  const result = await workerApplyPerspectiveCorrection(workerImageData, params);
 
-    const topWidth = Math.hypot(
-      params.topRight.x - params.topLeft.x,
-      params.topRight.y - params.topLeft.y,
-    );
-    const bottomWidth = Math.hypot(
-      params.bottomRight.x - params.bottomLeft.x,
-      params.bottomRight.y - params.bottomLeft.y,
-    );
-    const maxWidth = Math.max(1, Math.round(Math.max(topWidth, bottomWidth)));
+  // 結果を Canvas に描画
+  const resultCanvas = document.createElement("canvas");
+  resultCanvas.width = result.width;
+  resultCanvas.height = result.height;
+  const resultCtx = resultCanvas.getContext("2d")!;
+  const resultImgData = new ImageData(
+    new Uint8ClampedArray(result.data),
+    result.width,
+    result.height,
+  );
+  resultCtx.putImageData(resultImgData, 0, 0);
 
-    const leftHeight = Math.hypot(
-      params.bottomLeft.x - params.topLeft.x,
-      params.bottomLeft.y - params.topLeft.y,
-    );
-    const rightHeight = Math.hypot(
-      params.bottomRight.x - params.topRight.x,
-      params.bottomRight.y - params.topRight.y,
-    );
-    const maxHeight = Math.max(1, Math.round(Math.max(leftHeight, rightHeight)));
-
-    dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-      0, 0,
-      maxWidth, 0,
-      maxWidth, maxHeight,
-      0, maxHeight,
-    ]);
-
-    M = cv.getPerspectiveTransform(srcPts, dstPts);
-    const dsize = new cv.Size(maxWidth, maxHeight);
-    cv.warpPerspective(src, dst, M, dsize, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 0));
-
-    const resultCanvas = document.createElement("canvas");
-    resultCanvas.width = maxWidth;
-    resultCanvas.height = maxHeight;
-    cv.imshow(resultCanvas, dst);
-
-    return resultCanvas;
-  } finally {
-    M?.delete();
-    dstPts?.delete();
-    srcPts?.delete();
-    dst?.delete();
-    src?.delete();
-  }
+  return resultCanvas;
 }
 
 // ---------------------------------------------------------------------------
