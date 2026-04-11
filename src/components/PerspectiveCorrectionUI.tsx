@@ -314,7 +314,7 @@ export function PerspectiveCorrectionUI({
       e.preventDefault();
       e.stopPropagation();
       e.currentTarget.setPointerCapture(e.pointerId);
-      capturedElementRef.current = e.currentTarget;
+      capturedElementRef.current = e.currentTarget as HTMLElement;
       setDraggingCorner(corner);
       updateCornerFromPointer(e.clientX, e.clientY, corner);
     },
