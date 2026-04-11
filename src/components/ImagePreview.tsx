@@ -47,7 +47,7 @@ export function ImagePreview({
       try {
         let resultCanvas: HTMLCanvasElement;
 
-        if (corr && !corr.skipped) {
+        if (corr) {
           resultCanvas = await applyCorrections(img, corr);
         } else {
           const c = document.createElement("canvas");

@@ -457,11 +457,17 @@ export function applySharpen(
  * 2. 回転（Canvas API）
  * 3. 明るさ・コントラスト（Canvas API filter）
  * 4. シャープネス（ピクセル演算）
+ *
+ * `correction.skipped` が true の場合は補正をスキップし、元画像をそのまま Canvas に描画して返す。
  */
 export async function applyCorrections(
   source: ImageSource,
   correction: CorrectionResult,
 ): Promise<HTMLCanvasElement> {
+  if (correction.skipped) {
+    return source instanceof HTMLCanvasElement ? source : imageToCanvas(source);
+  }
+
   let current: ImageSource = source;
 
   // 1. 台形補正
