@@ -8,10 +8,12 @@
  *   Main → Worker:
  *     { type: 'init' }
  *     { type: 'perspective', id: string, imageData: { data: Uint8ClampedArray, width: number, height: number }, params: PerspectiveParams }
+ *     { type: 'detectDocument', id: string, imageData: { data: Uint8ClampedArray, width: number, height: number } }
  *   Worker → Main:
  *     { type: 'ready' }
  *     { type: 'loading' }
  *     { type: 'result', id: string, imageData: { data: Uint8ClampedArray, width: number, height: number } }
+ *     { type: 'result', id: string, perspectiveParams: PerspectiveParams | null }
  *     { type: 'error', id?: string, error: string }
  */
 
@@ -160,6 +162,120 @@ function applyPerspectiveCorrection(imageData, params) {
 }
 
 // ---------------------------------------------------------------------------
+// ドキュメント輪郭検出（Document Corner Detection）
+// ---------------------------------------------------------------------------
+
+/**
+ * 4隅の座標を左上・右上・右下・左下の順に整列する。
+ * @param {Array<{x: number, y: number}>} pts - 4点の配列
+ * @returns {{topLeft, topRight, bottomRight, bottomLeft}}
+ */
+function sortQuadPoints(pts) {
+  // (x+y) の昇順 → 最小が左上、最大が右下
+  const bySum = [...pts].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+  // (y-x) の昇順 → 最小が右上（xが大きくyが小さい）、最大が左下
+  const byDiff = [...pts].sort((a, b) => (a.y - a.x) - (b.y - b.x));
+  return {
+    topLeft: bySum[0],
+    bottomRight: bySum[3],
+    topRight: byDiff[0],
+    bottomLeft: byDiff[3],
+  };
+}
+
+/**
+ * OpenCV.js を使用してドキュメント（紙・手帳）の4隅座標を自動検出する。
+ * Canny エッジ検出 → 輪郭抽出 → 最大四角形近似の手順で推定する。
+ * @param {{ data: Uint8ClampedArray, width: number, height: number }} imageData
+ * @returns {{ topLeft, topRight, bottomRight, bottomLeft } | null}
+ */
+function detectDocumentCorners(imageData) {
+  const { data, width: srcWidth, height: srcHeight } = imageData;
+
+  const srcMat = cv.matFromImageData({
+    data: new Uint8ClampedArray(data),
+    width: srcWidth,
+    height: srcHeight,
+  });
+
+  let grayMat = null;
+  let blurMat = null;
+  let edgeMat = null;
+  let dilatedMat = null;
+  let contours = null;
+  let hierarchy = null;
+  let kernel = null;
+
+  try {
+    // 1. グレースケール変換
+    grayMat = new cv.Mat();
+    cv.cvtColor(srcMat, grayMat, cv.COLOR_RGBA2GRAY);
+
+    // 2. ガウシアンブラーでノイズ除去
+    blurMat = new cv.Mat();
+    cv.GaussianBlur(grayMat, blurMat, new cv.Size(5, 5), 0);
+
+    // 3. Canny エッジ検出
+    edgeMat = new cv.Mat();
+    cv.Canny(blurMat, edgeMat, 75, 200);
+
+    // 4. 膨張処理でエッジの隙間を埋める
+    dilatedMat = new cv.Mat();
+    kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+    cv.dilate(edgeMat, dilatedMat, kernel);
+
+    // 5. 外部輪郭の抽出
+    contours = new cv.MatVector();
+    hierarchy = new cv.Mat();
+    cv.findContours(dilatedMat, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    const imageArea = srcWidth * srcHeight;
+    const minArea = imageArea * 0.1; // 画像面積の10%以上
+
+    let bestParams = null;
+    let bestArea = 0;
+
+    for (let i = 0; i < contours.size(); i++) {
+      const contour = contours.get(i);
+      const area = cv.contourArea(contour);
+
+      if (area < minArea) continue;
+
+      // 多角形近似（epsilon = 弧長の2%）
+      const approx = new cv.Mat();
+      const peri = cv.arcLength(contour, true);
+      cv.approxPolyDP(contour, approx, 0.02 * peri, true);
+
+      if (approx.rows === 4 && area > bestArea) {
+        // 4隅の座標を取得（画像範囲内にクランプ）
+        const pts = [];
+        for (let j = 0; j < 4; j++) {
+          pts.push({
+            x: Math.max(0, Math.min(srcWidth - 1, approx.data32S[j * 2])),
+            y: Math.max(0, Math.min(srcHeight - 1, approx.data32S[j * 2 + 1])),
+          });
+        }
+        bestArea = area;
+        bestParams = sortQuadPoints(pts);
+      }
+      approx.delete();
+    }
+
+    return bestParams;
+
+  } finally {
+    kernel?.delete();
+    dilatedMat?.delete();
+    edgeMat?.delete();
+    blurMat?.delete();
+    grayMat?.delete();
+    contours?.delete();
+    hierarchy?.delete();
+    srcMat.delete();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // メッセージハンドラ
 // ---------------------------------------------------------------------------
 
@@ -176,6 +292,12 @@ self.onmessage = async (e) => {
         await initOpenCV();
         const result = applyPerspectiveCorrection(e.data.imageData, e.data.params);
         self.postMessage({ type: "result", id, imageData: result }, [result.data.buffer]);
+        break;
+      }
+      case "detectDocument": {
+        await initOpenCV();
+        const perspectiveParams = detectDocumentCorners(e.data.imageData);
+        self.postMessage({ type: "result", id, perspectiveParams });
         break;
       }
       default:

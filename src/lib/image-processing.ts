@@ -426,7 +426,170 @@ export async function applyCorrections(
     current = applySharpen(current, sharpness);
   }
 
+  // 5. 地色除去
+  if (correction.adjustments?.backgroundRemoval) {
+    current = applyBackgroundRemoval(current);
+  }
+
   return current instanceof HTMLCanvasElement ? current : imageToCanvas(current);
+}
+
+// ---------------------------------------------------------------------------
+// ドキュメント輪郭自動検出（Worker 経由）
+// ---------------------------------------------------------------------------
+
+const pendingDetectionTasks = new Map<
+  string,
+  {
+    resolve: (params: PerspectiveParams | null) => void;
+    reject: (err: Error) => void;
+  }
+>();
+
+/**
+ * Web Worker 経由でドキュメントの4隅座標を自動検出する。
+ */
+function workerDetectDocumentPerspective(
+  imageData: WorkerImageData,
+): Promise<PerspectiveParams | null> {
+  return new Promise((resolve, reject) => {
+    const w = ensureWorker();
+    const id = `detect-${++taskIdCounter}`;
+
+    pendingDetectionTasks.set(id, { resolve, reject });
+
+    const handler = (e: MessageEvent) => {
+      if (e.data.id !== id) return;
+      w.removeEventListener("message", handler);
+
+      const task = pendingDetectionTasks.get(id);
+      pendingDetectionTasks.delete(id);
+
+      if (!task) return;
+
+      if (e.data.type === "result") {
+        task.resolve(e.data.perspectiveParams ?? null);
+      } else if (e.data.type === "error") {
+        task.reject(new Error(e.data.error));
+      }
+    };
+    w.addEventListener("message", handler);
+
+    const copy = {
+      data: new Uint8ClampedArray(imageData.data),
+      width: imageData.width,
+      height: imageData.height,
+    };
+    w.postMessage(
+      { type: "detectDocument", id, imageData: copy },
+      [copy.data.buffer],
+    );
+  });
+}
+
+/**
+ * Web Worker 上の OpenCV.js を使用してドキュメントの4隅座標を自動検出する。
+ * Canny エッジ検出と輪郭近似により最大四角形領域を推定する。
+ * 検出できない場合は null を返す。
+ */
+export async function detectDocumentPerspective(
+  source: ImageSource,
+): Promise<PerspectiveParams | null> {
+  await initOpenCV();
+
+  const srcCanvas = imageToCanvas(source);
+  const ctx = srcCanvas.getContext("2d")!;
+  const imgData = ctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+
+  const workerImageData: WorkerImageData = {
+    data: imgData.data,
+    width: imgData.width,
+    height: imgData.height,
+  };
+
+  return workerDetectDocumentPerspective(workerImageData);
+}
+
+// ---------------------------------------------------------------------------
+// 自動明るさ・コントラスト分析
+// ---------------------------------------------------------------------------
+
+/**
+ * 画像のヒストグラムを分析し、明るさとコントラストの自動補正値を提案する。
+ * ITU-R BT.601 輝度値の 2/98 パーセンタイルを基準に算出する。
+ */
+export function analyzeImageAutoAdjustments(
+  source: ImageSource,
+): { brightness: number; contrast: number } {
+  const canvas = imageToCanvas(source);
+  const ctx = canvas.getContext("2d")!;
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imgData.data;
+
+  // 輝度ヒストグラムを構築（256段階）
+  const histogram = new Array<number>(256).fill(0);
+  const totalPixels = canvas.width * canvas.height;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    histogram[lum]++;
+  }
+
+  // 指定パーセンタイルの輝度値を取得する
+  const findPercentile = (pct: number): number => {
+    const target = totalPixels * pct;
+    let count = 0;
+    for (let v = 0; v < 256; v++) {
+      count += histogram[v];
+      if (count >= target) return v;
+    }
+    return 255;
+  };
+
+  const darkPoint = findPercentile(0.02);   // 2パーセンタイル（暗部）
+  const whitePoint = findPercentile(0.98);  // 98パーセンタイル（紙の色）
+
+  // 明るさ：紙が白（230以上）になるよう調整
+  const brightness = Math.round((230 - whitePoint) * 0.5);
+
+  // コントラスト：ダイナミックレンジが狭い場合に増強
+  const dynamicRange = whitePoint - darkPoint;
+  const contrast = Math.round((230 - dynamicRange) / 230 * 40);
+
+  return {
+    brightness: Math.max(-100, Math.min(100, brightness)),
+    contrast: Math.max(0, Math.min(100, contrast)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 地色除去（Background Removal）
+// ---------------------------------------------------------------------------
+
+/**
+ * 指定した閾値以上の明るさを持つピクセルを純白（255,255,255）に置換する。
+ * 紙の地色（クリーム・薄黄色など）を除去して背景を白くする。
+ * threshold は 0〜255 の範囲（デフォルト: 230）。
+ */
+export function applyBackgroundRemoval(
+  source: ImageSource,
+  threshold = 230,
+): HTMLCanvasElement {
+  const canvas = imageToCanvas(source);
+  const ctx = canvas.getContext("2d")!;
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imgData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] >= threshold && data[i + 1] >= threshold && data[i + 2] >= threshold) {
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+      // alpha は変更しない
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
 }
 
 // ---------------------------------------------------------------------------
