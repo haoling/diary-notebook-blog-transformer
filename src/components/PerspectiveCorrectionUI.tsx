@@ -216,6 +216,7 @@ export function PerspectiveCorrectionUI({
     existingCorrection?.adjustments?.backgroundRemoval ?? false,
   );
   const [autoCorrectLoading, setAutoCorrectLoading] = useState(false);
+  const [autoCorrectMessage, setAutoCorrectMessage] = useState<{ type: "success" | "warn"; text: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -475,6 +476,7 @@ export function PerspectiveCorrectionUI({
     setContrast(DEFAULT_CONTRAST);
     setSharpness(DEFAULT_SHARPNESS);
     setBackgroundRemoval(false);
+    setAutoCorrectMessage(null);
   }, [imageSize]);
 
   // ---- 自動補正 ----
@@ -501,12 +503,16 @@ export function PerspectiveCorrectionUI({
       if (perspParams) {
         setPerspective(perspParams);
         setUsePerspective(true);
+        setAutoCorrectMessage({ type: "success", text: "台形補正の輪郭を検出しました" });
+      } else {
+        setAutoCorrectMessage({ type: "warn", text: "輪郭を検出できませんでした。手動で調整してください。" });
       }
       setBrightness(autoAdj.brightness);
       setContrast(autoAdj.contrast);
       setBackgroundRemoval(true);
     } catch (err) {
       console.error("自動補正に失敗しました:", err);
+      setAutoCorrectMessage({ type: "warn", text: "自動補正に失敗しました。手動で調整してください。" });
     } finally {
       setAutoCorrectLoading(false);
     }
@@ -539,7 +545,20 @@ export function PerspectiveCorrectionUI({
     <div className="space-y-6">
       {/* ヘッダー */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800">🖼️ 画像補正</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold text-slate-800">🖼️ 画像補正</h2>
+          {autoCorrectMessage && (
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full ${
+                autoCorrectMessage.type === "success"
+                  ? "bg-green-100 text-green-700"
+                  : "bg-amber-100 text-amber-700"
+              }`}
+            >
+              {autoCorrectMessage.text}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <button
             type="button"

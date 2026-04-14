@@ -185,7 +185,7 @@ function sortQuadPoints(pts) {
 
 /**
  * OpenCV.js を使用してドキュメント（紙・手帳）の4隅座標を自動検出する。
- * Canny エッジ検出 → 輪郭抽出 → 最大四角形近似の手順で推定する。
+ * Canny エッジ検出 → 凸包 → 複数の epsilon で多角形近似を試みる。
  * @param {{ data: Uint8ClampedArray, width: number, height: number }} imageData
  * @returns {{ topLeft, topRight, bottomRight, bottomLeft } | null}
  */
@@ -215,9 +215,9 @@ function detectDocumentCorners(imageData) {
     blurMat = new cv.Mat();
     cv.GaussianBlur(grayMat, blurMat, new cv.Size(5, 5), 0);
 
-    // 3. Canny エッジ検出
+    // 3. Canny エッジ検出（閾値を低めにして検出感度を上げる）
     edgeMat = new cv.Mat();
-    cv.Canny(blurMat, edgeMat, 75, 200);
+    cv.Canny(blurMat, edgeMat, 50, 150);
 
     // 4. 膨張処理でエッジの隙間を埋める
     dilatedMat = new cv.Mat();
@@ -230,10 +230,13 @@ function detectDocumentCorners(imageData) {
     cv.findContours(dilatedMat, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
     const imageArea = srcWidth * srcHeight;
-    const minArea = imageArea * 0.1; // 画像面積の10%以上
+    const minArea = imageArea * 0.05; // 画像面積の5%以上（検出感度を上げる）
 
     let bestParams = null;
     let bestArea = 0;
+
+    // 複数の epsilon を試して4点の多角形近似を探す（小さい値から試みる）
+    const epsilonFactors = [0.02, 0.04, 0.06, 0.08, 0.10];
 
     for (let i = 0; i < contours.size(); i++) {
       const contour = contours.get(i);
@@ -241,24 +244,32 @@ function detectDocumentCorners(imageData) {
 
       if (area < minArea) continue;
 
-      // 多角形近似（epsilon = 弧長の2%）
-      const approx = new cv.Mat();
-      const peri = cv.arcLength(contour, true);
-      cv.approxPolyDP(contour, approx, 0.02 * peri, true);
+      // 凸包を使ってきれいな輪郭を取得（凹み・ノイズを排除）
+      const hull = new cv.Mat();
+      cv.convexHull(contour, hull, false, true);
+      const hullPeri = cv.arcLength(hull, true);
 
-      if (approx.rows === 4 && area > bestArea) {
-        // 4隅の座標を取得（画像範囲内にクランプ）
-        const pts = [];
-        for (let j = 0; j < 4; j++) {
-          pts.push({
-            x: Math.max(0, Math.min(srcWidth - 1, approx.data32S[j * 2])),
-            y: Math.max(0, Math.min(srcHeight - 1, approx.data32S[j * 2 + 1])),
-          });
+      for (const factor of epsilonFactors) {
+        const approx = new cv.Mat();
+        cv.approxPolyDP(hull, approx, factor * hullPeri, true);
+
+        if (approx.rows === 4 && area > bestArea) {
+          // 4隅の座標を取得（画像範囲内にクランプ）
+          const pts = [];
+          for (let j = 0; j < 4; j++) {
+            pts.push({
+              x: Math.max(0, Math.min(srcWidth - 1, approx.data32S[j * 2])),
+              y: Math.max(0, Math.min(srcHeight - 1, approx.data32S[j * 2 + 1])),
+            });
+          }
+          bestArea = area;
+          bestParams = sortQuadPoints(pts);
+          approx.delete();
+          break; // このコンターで4点が見つかったので次のepsilonは不要
         }
-        bestArea = area;
-        bestParams = sortQuadPoints(pts);
+        approx.delete();
       }
-      approx.delete();
+      hull.delete();
     }
 
     return bestParams;
