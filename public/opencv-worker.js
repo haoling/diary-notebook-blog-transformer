@@ -236,13 +236,13 @@ function findLargestQuad(contours, srcWidth, srcHeight) {
 /**
  * OpenCV.js を使用してドキュメント（紙・手帳）の4隅座標を自動検出する。
  *
- * パス1: Canny エッジ検出 → 輪郭抽出 → 最大四角形近似
- * パス2: Otsu 二値化 → モルフォロジー変換（文字・コンテンツの穴埋め）
- *         → 輪郭抽出 → 最大四角形近似
+ * パス1: 標準ブラー(5x5) → Canny エッジ検出 → 膨張 → 輪郭抽出 → 最大四角形近似
+ * パス2: 大きなブラー(min(W,H)/15px) → Canny(低閾値) → 大膨張(5x5) → 輪郭抽出 → 最大四角形近似
  *
- * パス1で検出できない場合（複雑な背景・低コントラスト時）に
- * パス2を試みる。パス2は「紙の明るさ」を利用して紙領域を分割するため、
- * 手帳のような背景と色差が明確な場合に効果的。
+ * パス1で検出できない場合（複雑な背景・テキストが多い画像）に
+ * パス2を試みる。パス2は強いガウシアンブラーでキーボードキーや
+ * 文字などの細かい特徴量を消し、手帳のページ・表紙の大きな
+ * 境界線のみを検出するため、背景が複雑な場合に効果的。
  *
  * @param {{ data: Uint8ClampedArray, width: number, height: number }} imageData
  * @returns {{ topLeft, topRight, bottomRight, bottomLeft } | null}
@@ -265,11 +265,12 @@ function detectDocumentCorners(imageData) {
   let edgeHierarchy = null;
   let edgeKernel = null;
   // パス2 用
-  let threshMat = null;
-  let closedMat = null;
-  let threshContours = null;
-  let threshHierarchy = null;
-  let morphKernel = null;
+  let bigBlurMat = null;
+  let bigEdgeMat = null;
+  let bigDilatedMat = null;
+  let bigContours = null;
+  let bigHierarchy = null;
+  let bigKernel = null;
 
   try {
     // 共通前処理: グレースケール + ガウシアンブラー
@@ -293,34 +294,40 @@ function detectDocumentCorners(imageData) {
 
     let result = findLargestQuad(edgeContours, srcWidth, srcHeight);
 
-    // === パス2: Otsu 二値化 + モルフォロジー変換 ===
-    // パス1で未検出の場合のみ実行（紙の明るさで領域分割）
+    // === パス2: 大きなブラー + Canny（文字・小物を除去して大きなエッジのみ検出） ===
+    // 強いガウシアンブラーでキーボードキーや文字など小さな特徴量を消し、
+    // 手帳のページ・表紙の大きな境界線だけを Canny で検出する。
     if (!result) {
-      // Otsu 閾値で紙の明るい領域を抽出
-      threshMat = new cv.Mat();
-      cv.threshold(grayMat, threshMat, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+      let kBlur = Math.round(Math.min(srcWidth, srcHeight) / 15);
+      kBlur = Math.min(75, Math.max(15, kBlur));
+      if (kBlur % 2 === 0) kBlur += 1;
 
-      // 大きなカーネルで文字・線・コンテンツの穴を塞ぐ
-      const kSize = Math.max(5, Math.round(Math.min(srcWidth, srcHeight) / 25));
-      morphKernel = cv.Mat.ones(kSize, kSize, cv.CV_8U);
-      closedMat = new cv.Mat();
-      cv.morphologyEx(threshMat, closedMat, cv.MORPH_CLOSE, morphKernel);
+      bigBlurMat = new cv.Mat();
+      cv.GaussianBlur(grayMat, bigBlurMat, new cv.Size(kBlur, kBlur), 0);
 
-      threshContours = new cv.MatVector();
-      threshHierarchy = new cv.Mat();
-      cv.findContours(closedMat, threshContours, threshHierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+      bigEdgeMat = new cv.Mat();
+      cv.Canny(bigBlurMat, bigEdgeMat, 20, 60);
 
-      result = findLargestQuad(threshContours, srcWidth, srcHeight);
+      bigDilatedMat = new cv.Mat();
+      bigKernel = cv.Mat.ones(5, 5, cv.CV_8U);
+      cv.dilate(bigEdgeMat, bigDilatedMat, bigKernel);
+
+      bigContours = new cv.MatVector();
+      bigHierarchy = new cv.Mat();
+      cv.findContours(bigDilatedMat, bigContours, bigHierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+      result = findLargestQuad(bigContours, srcWidth, srcHeight);
     }
 
     return result;
 
   } finally {
-    morphKernel?.delete();
-    closedMat?.delete();
-    threshHierarchy?.delete();
-    threshContours?.delete();
-    threshMat?.delete();
+    bigKernel?.delete();
+    bigHierarchy?.delete();
+    bigContours?.delete();
+    bigDilatedMat?.delete();
+    bigEdgeMat?.delete();
+    bigBlurMat?.delete();
     edgeKernel?.delete();
     dilatedMat?.delete();
     edgeHierarchy?.delete();
