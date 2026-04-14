@@ -184,8 +184,66 @@ function sortQuadPoints(pts) {
 }
 
 /**
+ * 輪郭の MatVector から最大面積の4点凸多角形近似を返す共通ロジック。
+ * epsilon を複数試して最初に4点近似が得られたものを採用する。
+ * @param {cv.MatVector} contours
+ * @param {number} srcWidth
+ * @param {number} srcHeight
+ * @returns {{topLeft, topRight, bottomRight, bottomLeft} | null}
+ */
+function findLargestQuad(contours, srcWidth, srcHeight) {
+  const imageArea = srcWidth * srcHeight;
+  const minArea = imageArea * 0.05;
+  const epsilonFactors = [0.02, 0.04, 0.06, 0.08, 0.10, 0.15];
+
+  let bestParams = null;
+  let bestArea = 0;
+
+  for (let i = 0; i < contours.size(); i++) {
+    const contour = contours.get(i);
+    const area = cv.contourArea(contour);
+    if (area < minArea) continue;
+
+    const hull = new cv.Mat();
+    cv.convexHull(contour, hull, false, true);
+    const hullPeri = cv.arcLength(hull, true);
+
+    for (const factor of epsilonFactors) {
+      const approx = new cv.Mat();
+      cv.approxPolyDP(hull, approx, factor * hullPeri, true);
+
+      if (approx.rows === 4 && area > bestArea) {
+        const pts = [];
+        for (let j = 0; j < 4; j++) {
+          pts.push({
+            x: Math.max(0, Math.min(srcWidth - 1, approx.data32S[j * 2])),
+            y: Math.max(0, Math.min(srcHeight - 1, approx.data32S[j * 2 + 1])),
+          });
+        }
+        bestArea = area;
+        bestParams = sortQuadPoints(pts);
+        approx.delete();
+        break;
+      }
+      approx.delete();
+    }
+    hull.delete();
+  }
+
+  return bestParams;
+}
+
+/**
  * OpenCV.js を使用してドキュメント（紙・手帳）の4隅座標を自動検出する。
- * Canny エッジ検出 → 凸包 → 複数の epsilon で多角形近似を試みる。
+ *
+ * パス1: Canny エッジ検出 → 輪郭抽出 → 最大四角形近似
+ * パス2: Otsu 二値化 → モルフォロジー変換（文字・コンテンツの穴埋め）
+ *         → 輪郭抽出 → 最大四角形近似
+ *
+ * パス1で検出できない場合（複雑な背景・低コントラスト時）に
+ * パス2を試みる。パス2は「紙の明るさ」を利用して紙領域を分割するため、
+ * 手帳のような背景と色差が明確な場合に効果的。
+ *
  * @param {{ data: Uint8ClampedArray, width: number, height: number }} imageData
  * @returns {{ topLeft, topRight, bottomRight, bottomLeft } | null}
  */
@@ -200,88 +258,76 @@ function detectDocumentCorners(imageData) {
 
   let grayMat = null;
   let blurMat = null;
+  // パス1 用
   let edgeMat = null;
   let dilatedMat = null;
-  let contours = null;
-  let hierarchy = null;
-  let kernel = null;
+  let edgeContours = null;
+  let edgeHierarchy = null;
+  let edgeKernel = null;
+  // パス2 用
+  let threshMat = null;
+  let closedMat = null;
+  let threshContours = null;
+  let threshHierarchy = null;
+  let morphKernel = null;
 
   try {
-    // 1. グレースケール変換
+    // 共通前処理: グレースケール + ガウシアンブラー
     grayMat = new cv.Mat();
     cv.cvtColor(srcMat, grayMat, cv.COLOR_RGBA2GRAY);
 
-    // 2. ガウシアンブラーでノイズ除去
     blurMat = new cv.Mat();
     cv.GaussianBlur(grayMat, blurMat, new cv.Size(5, 5), 0);
 
-    // 3. Canny エッジ検出（閾値を低めにして検出感度を上げる）
+    // === パス1: Canny エッジ検出 ===
     edgeMat = new cv.Mat();
     cv.Canny(blurMat, edgeMat, 50, 150);
 
-    // 4. 膨張処理でエッジの隙間を埋める
     dilatedMat = new cv.Mat();
-    kernel = cv.Mat.ones(3, 3, cv.CV_8U);
-    cv.dilate(edgeMat, dilatedMat, kernel);
+    edgeKernel = cv.Mat.ones(3, 3, cv.CV_8U);
+    cv.dilate(edgeMat, dilatedMat, edgeKernel);
 
-    // 5. 外部輪郭の抽出
-    contours = new cv.MatVector();
-    hierarchy = new cv.Mat();
-    cv.findContours(dilatedMat, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    edgeContours = new cv.MatVector();
+    edgeHierarchy = new cv.Mat();
+    cv.findContours(dilatedMat, edgeContours, edgeHierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-    const imageArea = srcWidth * srcHeight;
-    const minArea = imageArea * 0.05; // 画像面積の5%以上（検出感度を上げる）
+    let result = findLargestQuad(edgeContours, srcWidth, srcHeight);
 
-    let bestParams = null;
-    let bestArea = 0;
+    // === パス2: Otsu 二値化 + モルフォロジー変換 ===
+    // パス1で未検出の場合のみ実行（紙の明るさで領域分割）
+    if (!result) {
+      // Otsu 閾値で紙の明るい領域を抽出
+      threshMat = new cv.Mat();
+      cv.threshold(grayMat, threshMat, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
 
-    // 複数の epsilon を試して4点の多角形近似を探す（小さい値から試みる）
-    const epsilonFactors = [0.02, 0.04, 0.06, 0.08, 0.10];
+      // 大きなカーネルで文字・線・コンテンツの穴を塞ぐ
+      const kSize = Math.max(5, Math.round(Math.min(srcWidth, srcHeight) / 25));
+      morphKernel = cv.Mat.ones(kSize, kSize, cv.CV_8U);
+      closedMat = new cv.Mat();
+      cv.morphologyEx(threshMat, closedMat, cv.MORPH_CLOSE, morphKernel);
 
-    for (let i = 0; i < contours.size(); i++) {
-      const contour = contours.get(i);
-      const area = cv.contourArea(contour);
+      threshContours = new cv.MatVector();
+      threshHierarchy = new cv.Mat();
+      cv.findContours(closedMat, threshContours, threshHierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-      if (area < minArea) continue;
-
-      // 凸包を使ってきれいな輪郭を取得（凹み・ノイズを排除）
-      const hull = new cv.Mat();
-      cv.convexHull(contour, hull, false, true);
-      const hullPeri = cv.arcLength(hull, true);
-
-      for (const factor of epsilonFactors) {
-        const approx = new cv.Mat();
-        cv.approxPolyDP(hull, approx, factor * hullPeri, true);
-
-        if (approx.rows === 4 && area > bestArea) {
-          // 4隅の座標を取得（画像範囲内にクランプ）
-          const pts = [];
-          for (let j = 0; j < 4; j++) {
-            pts.push({
-              x: Math.max(0, Math.min(srcWidth - 1, approx.data32S[j * 2])),
-              y: Math.max(0, Math.min(srcHeight - 1, approx.data32S[j * 2 + 1])),
-            });
-          }
-          bestArea = area;
-          bestParams = sortQuadPoints(pts);
-          approx.delete();
-          break; // このコンターで4点が見つかったので次のepsilonは不要
-        }
-        approx.delete();
-      }
-      hull.delete();
+      result = findLargestQuad(threshContours, srcWidth, srcHeight);
     }
 
-    return bestParams;
+    return result;
 
   } finally {
-    kernel?.delete();
+    morphKernel?.delete();
+    closedMat?.delete();
+    threshHierarchy?.delete();
+    threshContours?.delete();
+    threshMat?.delete();
+    edgeKernel?.delete();
     dilatedMat?.delete();
+    edgeHierarchy?.delete();
+    edgeContours?.delete();
     edgeMat?.delete();
     blurMat?.delete();
     grayMat?.delete();
-    contours?.delete();
-    hierarchy?.delete();
     srcMat.delete();
   }
 }
