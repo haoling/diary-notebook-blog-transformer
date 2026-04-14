@@ -15,7 +15,6 @@ import {
   loadOpenCV,
   initOpenCV,
   detectDocumentPerspective,
-  analyzeImageAutoAdjustments,
 } from "@/lib/image-processing";
 import type {
   CorrectionResult,
@@ -495,10 +494,7 @@ export function PerspectiveCorrectionUI({
 
       await initOpenCV();
 
-      const [perspParams, autoAdj] = await Promise.all([
-        detectDocumentPerspective(img),
-        Promise.resolve(analyzeImageAutoAdjustments(img)),
-      ]);
+      const perspParams = await detectDocumentPerspective(img);
 
       if (perspParams) {
         setPerspective(perspParams);
@@ -507,9 +503,6 @@ export function PerspectiveCorrectionUI({
       } else {
         setAutoCorrectMessage({ type: "warn", text: "輪郭を検出できませんでした。手動で調整してください。" });
       }
-      setBrightness(autoAdj.brightness);
-      setContrast(autoAdj.contrast);
-      setBackgroundRemoval(true);
     } catch (err) {
       console.error("自動補正に失敗しました:", err);
       setAutoCorrectMessage({ type: "warn", text: "自動補正に失敗しました。手動で調整してください。" });
