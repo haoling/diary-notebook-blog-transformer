@@ -164,21 +164,36 @@ function sendWorkerTask<T>(
     const w = ensureWorker();
     const id = `task-${++taskIdCounter}`;
 
+    const cleanup = () => {
+      w.removeEventListener("message", handler);
+      w.removeEventListener("error", workerErrorHandler);
+      w.removeEventListener("messageerror", workerErrorHandler);
+    };
+
     const handler = (e: MessageEvent) => {
       if (e.data.id !== id) return;
-      w.removeEventListener("message", handler);
+      cleanup();
       if (e.data.type === "result") {
         resolve(extractResult(e.data));
       } else if (e.data.type === "error") {
         reject(new Error(e.data.error));
       }
     };
+
+    // Worker クラッシュ・応答不能時にリスナーが残らないよう reject して解放する
+    const workerErrorHandler = (e: ErrorEvent | MessageEvent) => {
+      cleanup();
+      reject(new Error((e as ErrorEvent).message ?? "Worker error"));
+    };
+
     w.addEventListener("message", handler);
+    w.addEventListener("error", workerErrorHandler);
+    w.addEventListener("messageerror", workerErrorHandler);
 
     try {
       w.postMessage({ ...message, id }, transferables);
     } catch (error) {
-      w.removeEventListener("message", handler);
+      cleanup();
       reject(error);
     }
   });
