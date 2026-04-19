@@ -492,8 +492,6 @@ export function PerspectiveCorrectionUI({
         img.src = imageUrl;
       });
 
-      await initOpenCV();
-
       const [perspParams, autoAdj] = await Promise.all([
         detectDocumentPerspective(img),
         analyzeImageAutoAdjustments(img),

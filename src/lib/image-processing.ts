@@ -175,7 +175,12 @@ function sendWorkerTask<T>(
     };
     w.addEventListener("message", handler);
 
-    w.postMessage({ ...message, id }, transferables);
+    try {
+      w.postMessage({ ...message, id }, transferables);
+    } catch (error) {
+      w.removeEventListener("message", handler);
+      reject(error);
+    }
   });
 }
 
@@ -387,7 +392,7 @@ export function applySharpen(
  * 2. 回転（Canvas API）
  * 3. 明るさ・コントラスト（Canvas API filter）
  * 4. シャープネス（ピクセル演算）
- * 5. 地色除去（輝度閾値超ピクセルを純白に置換）
+ * 5. 地色除去（RGB の各チャンネルが threshold 以上のピクセルを純白に置換）
  *
  * `correction.skipped` が true の場合は補正をスキップし、元画像をそのまま Canvas に描画して返す。
  */
@@ -533,7 +538,7 @@ export function analyzeImageAutoAdjustments(
 // ---------------------------------------------------------------------------
 
 /**
- * 指定した閾値以上の明るさを持つピクセルを純白（255,255,255）に置換する。
+ * RGB の各チャンネルがすべて threshold 以上のピクセルを純白（255,255,255）に置換する。
  * 紙の地色（クリーム・薄黄色など）を除去して背景を白くする。
  * threshold は 0〜255 の範囲（デフォルト: 230）。
  */

@@ -256,7 +256,7 @@ function detectDocumentCorners(imageData) {
   const { data, width: srcWidth, height: srcHeight } = imageData;
 
   const srcMat = cv.matFromImageData({
-    data: new Uint8ClampedArray(data),
+    data,
     width: srcWidth,
     height: srcHeight,
   });
