@@ -12,7 +12,6 @@ import {
   applyCorrections,
   createDefaultPerspectiveParams,
   isOpencvLoaded,
-  loadOpenCV,
   initOpenCV,
   detectDocumentPerspective,
   analyzeImageAutoAdjustments,
@@ -260,7 +259,7 @@ export function PerspectiveCorrectionUI({
       return;
     }
     setOpencvStatus("loading");
-    loadOpenCV()
+    initOpenCV()
       .then(() => setOpencvStatus("ready"))
       .catch(() => setOpencvStatus("error"));
   }, [usePerspective]);
@@ -497,7 +496,7 @@ export function PerspectiveCorrectionUI({
 
       const [perspParams, autoAdj] = await Promise.all([
         detectDocumentPerspective(img),
-        Promise.resolve(analyzeImageAutoAdjustments(img)),
+        analyzeImageAutoAdjustments(img),
       ]);
 
       if (perspParams) {

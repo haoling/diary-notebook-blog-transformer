@@ -193,6 +193,7 @@ function sortQuadPoints(pts) {
  */
 function findLargestQuad(contours, srcWidth, srcHeight) {
   const imageArea = srcWidth * srcHeight;
+  // 5%: 画像面積の5%未満の輪郭はノイズとして除外。10%では小さな手帳が漏れるため低めに設定。
   const minArea = imageArea * 0.05;
   const epsilonFactors = [0.02, 0.04, 0.06, 0.08, 0.10, 0.15];
 
@@ -202,7 +203,10 @@ function findLargestQuad(contours, srcWidth, srcHeight) {
   for (let i = 0; i < contours.size(); i++) {
     const contour = contours.get(i);
     const area = cv.contourArea(contour);
-    if (area < minArea) continue;
+    if (area < minArea) {
+      contour.delete();
+      continue;
+    }
 
     const hull = new cv.Mat();
     cv.convexHull(contour, hull, false, true);
@@ -228,6 +232,7 @@ function findLargestQuad(contours, srcWidth, srcHeight) {
       approx.delete();
     }
     hull.delete();
+    contour.delete();
   }
 
   return bestParams;

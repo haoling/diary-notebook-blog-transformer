@@ -150,13 +150,34 @@ export function imageToCanvas(source: ImageSource): HTMLCanvasElement {
 // ---------------------------------------------------------------------------
 
 let taskIdCounter = 0;
-const pendingTasks = new Map<
-  string,
-  {
-    resolve: (data: WorkerImageData) => void;
-    reject: (err: Error) => void;
-  }
->();
+
+/**
+ * Web Worker へタスクを送信し、結果を Promise で返す共通ヘルパー。
+ * メッセージ種別と結果抽出ロジックのみ呼び出し元で差し替える。
+ */
+function sendWorkerTask<T>(
+  message: Record<string, unknown>,
+  extractResult: (data: MessageEvent["data"]) => T,
+  transferables: Transferable[] = [],
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const w = ensureWorker();
+    const id = `task-${++taskIdCounter}`;
+
+    const handler = (e: MessageEvent) => {
+      if (e.data.id !== id) return;
+      w.removeEventListener("message", handler);
+      if (e.data.type === "result") {
+        resolve(extractResult(e.data));
+      } else if (e.data.type === "error") {
+        reject(new Error(e.data.error));
+      }
+    };
+    w.addEventListener("message", handler);
+
+    w.postMessage({ ...message, id }, transferables);
+  });
+}
 
 /**
  * Web Worker 経由で台形補正を適用する。
@@ -166,41 +187,17 @@ function workerApplyPerspectiveCorrection(
   imageData: WorkerImageData,
   params: PerspectiveParams,
 ): Promise<WorkerImageData> {
-  return new Promise((resolve, reject) => {
-    const w = ensureWorker();
-    const id = `task-${++taskIdCounter}`;
-
-    pendingTasks.set(id, { resolve, reject });
-
-    // 一時的なメッセージハンドラを設定（結果の受け取り用）
-    const handler = (e: MessageEvent) => {
-      if (e.data.id !== id) return;
-      w.removeEventListener("message", handler);
-
-      const task = pendingTasks.get(id);
-      pendingTasks.delete(id);
-
-      if (!task) return;
-
-      if (e.data.type === "result") {
-        task.resolve(e.data.imageData);
-      } else if (e.data.type === "error") {
-        task.reject(new Error(e.data.error));
-      }
-    };
-    w.addEventListener("message", handler);
-
-    // ImageData のバッファを Transferable として送信（ゼロコピー）
-    const copy = {
-      data: new Uint8ClampedArray(imageData.data),
-      width: imageData.width,
-      height: imageData.height,
-    };
-    w.postMessage(
-      { type: "perspective", id, imageData: copy, params },
-      [copy.data.buffer],
-    );
-  });
+  // ImageData のバッファを Transferable として送信（ゼロコピー）
+  const copy = {
+    data: new Uint8ClampedArray(imageData.data),
+    width: imageData.width,
+    height: imageData.height,
+  };
+  return sendWorkerTask(
+    { type: "perspective", imageData: copy, params },
+    (data) => data.imageData as WorkerImageData,
+    [copy.data.buffer],
+  );
 }
 
 /**
@@ -390,6 +387,7 @@ export function applySharpen(
  * 2. 回転（Canvas API）
  * 3. 明るさ・コントラスト（Canvas API filter）
  * 4. シャープネス（ピクセル演算）
+ * 5. 地色除去（輝度閾値超ピクセルを純白に置換）
  *
  * `correction.skipped` が true の場合は補正をスキップし、元画像をそのまま Canvas に描画して返す。
  */
@@ -438,53 +436,22 @@ export async function applyCorrections(
 // ドキュメント輪郭自動検出（Worker 経由）
 // ---------------------------------------------------------------------------
 
-const pendingDetectionTasks = new Map<
-  string,
-  {
-    resolve: (params: PerspectiveParams | null) => void;
-    reject: (err: Error) => void;
-  }
->();
-
 /**
  * Web Worker 経由でドキュメントの4隅座標を自動検出する。
  */
 function workerDetectDocumentPerspective(
   imageData: WorkerImageData,
 ): Promise<PerspectiveParams | null> {
-  return new Promise((resolve, reject) => {
-    const w = ensureWorker();
-    const id = `detect-${++taskIdCounter}`;
-
-    pendingDetectionTasks.set(id, { resolve, reject });
-
-    const handler = (e: MessageEvent) => {
-      if (e.data.id !== id) return;
-      w.removeEventListener("message", handler);
-
-      const task = pendingDetectionTasks.get(id);
-      pendingDetectionTasks.delete(id);
-
-      if (!task) return;
-
-      if (e.data.type === "result") {
-        task.resolve(e.data.perspectiveParams ?? null);
-      } else if (e.data.type === "error") {
-        task.reject(new Error(e.data.error));
-      }
-    };
-    w.addEventListener("message", handler);
-
-    const copy = {
-      data: new Uint8ClampedArray(imageData.data),
-      width: imageData.width,
-      height: imageData.height,
-    };
-    w.postMessage(
-      { type: "detectDocument", id, imageData: copy },
-      [copy.data.buffer],
-    );
-  });
+  const copy = {
+    data: new Uint8ClampedArray(imageData.data),
+    width: imageData.width,
+    height: imageData.height,
+  };
+  return sendWorkerTask(
+    { type: "detectDocument", imageData: copy },
+    (data) => (data.perspectiveParams as PerspectiveParams | null) ?? null,
+    [copy.data.buffer],
+  );
 }
 
 /**
