@@ -12,7 +12,9 @@ import {
   applyCorrections,
   createDefaultPerspectiveParams,
   isOpencvLoaded,
-  loadOpenCV,
+  initOpenCV,
+  detectDocumentPerspective,
+  analyzeImageAutoAdjustments,
 } from "@/lib/image-processing";
 import type {
   CorrectionResult,
@@ -209,6 +211,16 @@ export function PerspectiveCorrectionUI({
   const [sharpness, setSharpness] = useState(
     existingCorrection?.adjustments?.sharpness ?? DEFAULT_SHARPNESS,
   );
+  const [backgroundRemoval, setBackgroundRemoval] = useState(
+    existingCorrection?.adjustments?.backgroundRemoval ?? false,
+  );
+  const [autoCorrectLoading, setAutoCorrectLoading] = useState(false);
+  const [autoCorrectMessage, setAutoCorrectMessage] = useState<{ type: "success" | "warn"; text: string } | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -252,7 +264,7 @@ export function PerspectiveCorrectionUI({
       return;
     }
     setOpencvStatus("loading");
-    loadOpenCV()
+    initOpenCV()
       .then(() => setOpencvStatus("ready"))
       .catch(() => setOpencvStatus("error"));
   }, [usePerspective]);
@@ -337,6 +349,25 @@ export function PerspectiveCorrectionUI({
     setDraggingCorner(null);
   }, []);
 
+  // ---- CorrectionResult 組み立てヘルパー（プレビューと保存で共用） ----
+
+  const buildCorrectionResult = useCallback((): CorrectionResult => ({
+    correctedAt: new Date().toISOString(),
+    skipped: false,
+    ...(usePerspective && perspective ? { perspective } : {}),
+    ...(rotation !== 0 ? { rotation } : {}),
+    ...((brightness !== 0 || contrast !== 0 || sharpness > 0 || backgroundRemoval)
+      ? {
+          adjustments: {
+            ...(brightness !== 0 ? { brightness } : {}),
+            ...(contrast !== 0 ? { contrast } : {}),
+            ...(sharpness > 0 ? { sharpness } : {}),
+            ...(backgroundRemoval ? { backgroundRemoval: true } : {}),
+          },
+        }
+      : {}),
+  }), [usePerspective, perspective, rotation, brightness, contrast, sharpness, backgroundRemoval]);
+
   // ---- プレビューのデバウンス更新 ----
 
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -367,21 +398,7 @@ export function PerspectiveCorrectionUI({
           img.src = imageUrl;
         });
 
-        const correction: CorrectionResult = {
-          correctedAt: new Date().toISOString(),
-          skipped: false,
-          ...(usePerspective && perspective ? { perspective } : {}),
-          ...(rotation !== 0 ? { rotation } : {}),
-          ...((brightness !== 0 || contrast !== 0 || sharpness > 0)
-            ? {
-                adjustments: {
-                  ...(brightness !== 0 ? { brightness } : {}),
-                  ...(contrast !== 0 ? { contrast } : {}),
-                  ...(sharpness > 0 ? { sharpness } : {}),
-                },
-              }
-            : {}),
-        };
+        const correction = buildCorrectionResult();
 
         const resultCanvas = await applyCorrections(img, correction);
 
@@ -417,7 +434,7 @@ export function PerspectiveCorrectionUI({
       previewRequestIdRef.current = -1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageUrl, imageSize, usePerspective, perspective, rotation, brightness, contrast, sharpness]);
+  }, [imageUrl, imageSize, buildCorrectionResult]);
 
   // ---- プレビュー URL のクリーンアップ ----
 
@@ -432,23 +449,8 @@ export function PerspectiveCorrectionUI({
   // ---- 保存 ----
 
   const handleSave = useCallback(() => {
-    const correction: CorrectionResult = {
-      correctedAt: new Date().toISOString(),
-      skipped: false,
-      ...(usePerspective && perspective ? { perspective } : {}),
-      ...(rotation !== 0 ? { rotation } : {}),
-      ...((brightness !== 0 || contrast !== 0 || sharpness > 0)
-        ? {
-            adjustments: {
-              ...(brightness !== 0 ? { brightness } : {}),
-              ...(contrast !== 0 ? { contrast } : {}),
-              ...(sharpness > 0 ? { sharpness } : {}),
-            },
-          }
-        : {}),
-    };
-    onSave(correction);
-  }, [usePerspective, perspective, rotation, brightness, contrast, sharpness, onSave]);
+    onSave(buildCorrectionResult());
+  }, [buildCorrectionResult, onSave]);
 
   const handleSkip = useCallback(() => {
     onSave({
@@ -465,12 +467,51 @@ export function PerspectiveCorrectionUI({
     setBrightness(DEFAULT_BRIGHTNESS);
     setContrast(DEFAULT_CONTRAST);
     setSharpness(DEFAULT_SHARPNESS);
+    setBackgroundRemoval(false);
+    setAutoCorrectMessage(null);
   }, [imageSize]);
+
+  // ---- 自動補正 ----
+
+  const handleAutoCorrect = useCallback(async () => {
+    if (!imageSize) return;
+    setAutoCorrectLoading(true);
+    try {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      await new Promise<void>((resolve, reject) => {
+        img.addEventListener("load", () => resolve(), { once: true });
+        img.addEventListener("error", () => reject(new Error("画像の読み込みに失敗しました。")), { once: true });
+        img.src = imageUrl;
+      });
+
+      const perspParams = await detectDocumentPerspective(img);
+      const autoAdj = analyzeImageAutoAdjustments(img);
+
+      if (!mountedRef.current) return;
+      if (perspParams) {
+        setPerspective(perspParams);
+        setUsePerspective(true);
+        setAutoCorrectMessage({ type: "success", text: "台形補正の輪郭を検出しました" });
+      } else {
+        setAutoCorrectMessage({ type: "warn", text: "輪郭を検出できませんでした。手動で調整してください。" });
+      }
+      setBrightness(autoAdj.brightness);
+      setContrast(autoAdj.contrast);
+      setBackgroundRemoval(true);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      console.error("自動補正に失敗しました:", err);
+      setAutoCorrectMessage({ type: "warn", text: "自動補正に失敗しました。手動で調整してください。" });
+    } finally {
+      if (mountedRef.current) setAutoCorrectLoading(false);
+    }
+  }, [imageUrl, imageSize]);
 
   // ---- 有効な補正があるか ----
 
   const hasAdjustments = rotation !== 0 || brightness !== 0 || contrast !== 0 || sharpness > 0;
-  const canSave = usePerspective || hasAdjustments;
+  const canSave = usePerspective || hasAdjustments || backgroundRemoval;
 
   // ---- レンダリング ----
 
@@ -494,8 +535,29 @@ export function PerspectiveCorrectionUI({
     <div className="space-y-6">
       {/* ヘッダー */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800">🖼️ 画像補正</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold text-slate-800">🖼️ 画像補正</h2>
+          {autoCorrectMessage && (
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full ${
+                autoCorrectMessage.type === "success"
+                  ? "bg-green-100 text-green-700"
+                  : "bg-amber-100 text-amber-700"
+              }`}
+            >
+              <span role="status" aria-live="polite">{autoCorrectMessage.text}</span>
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleAutoCorrect}
+            disabled={autoCorrectLoading || loading}
+            className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 px-2 py-1 rounded border border-blue-200 hover:border-blue-300"
+          >
+            {autoCorrectLoading ? "検出中..." : "🪄 自動補正"}
+          </button>
           <button
             type="button"
             onClick={handleReset}
@@ -662,6 +724,21 @@ export function PerspectiveCorrectionUI({
             onChange={setSharpness}
             onReset={() => setSharpness(DEFAULT_SHARPNESS)}
           />
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              type="checkbox"
+              id="backgroundRemoval"
+              checked={backgroundRemoval}
+              onChange={(e) => setBackgroundRemoval(e.target.checked)}
+              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            <label
+              htmlFor="backgroundRemoval"
+              className="text-sm font-medium text-slate-700 cursor-pointer"
+            >
+              地色除去（背景を白に）
+            </label>
+          </div>
         </div>
       </div>
 

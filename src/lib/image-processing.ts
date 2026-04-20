@@ -150,13 +150,84 @@ export function imageToCanvas(source: ImageSource): HTMLCanvasElement {
 // ---------------------------------------------------------------------------
 
 let taskIdCounter = 0;
-const pendingTasks = new Map<
-  string,
-  {
-    resolve: (data: WorkerImageData) => void;
-    reject: (err: Error) => void;
-  }
->();
+
+/**
+ * Web Worker へタスクを送信し、結果を Promise で返す共通ヘルパー。
+ * メッセージ種別と結果抽出ロジックのみ呼び出し元で差し替える。
+ * timeoutMs 以内に応答がなければ reject してリスナーを解放する（デフォルト 30 秒）。
+ */
+function sendWorkerTask<T>(
+  message: Record<string, unknown>,
+  extractResult: (data: MessageEvent["data"]) => T,
+  transferables: Transferable[] = [],
+  timeoutMs = 30_000,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const w = ensureWorker();
+    const id = `task-${++taskIdCounter}`;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      w.removeEventListener("message", handler);
+      w.removeEventListener("error", workerErrorHandler);
+      w.removeEventListener("messageerror", workerErrorHandler);
+    };
+
+    const handler = (e: MessageEvent) => {
+      // id なしのグローバルエラー（OpenCV 初期化失敗など）もタスクに伝播させる
+      if (e.data.type === "error" && !e.data.id) {
+        cleanup();
+        reject(new Error(e.data.error ?? "Worker error"));
+        return;
+      }
+      if (e.data.id !== id) return;
+      cleanup();
+      if (e.data.type === "result") {
+        try {
+          resolve(extractResult(e.data));
+        } catch (error: unknown) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      } else if (e.data.type === "error") {
+        reject(new Error(e.data.error));
+      }
+    };
+
+    // Worker クラッシュ・応答不能時にリスナーが残らないよう reject して解放する
+    const workerErrorHandler = (e: ErrorEvent | MessageEvent) => {
+      cleanup();
+      const errorMessage =
+        e.type === "messageerror"
+          ? `Worker messageerror: could not deserialize message (type=${e.type})`
+          : e instanceof ErrorEvent && e.message
+            ? e.message
+            : "Worker error";
+      reject(new Error(errorMessage));
+    };
+
+    w.addEventListener("message", handler);
+    w.addEventListener("error", workerErrorHandler);
+    w.addEventListener("messageerror", workerErrorHandler);
+
+    // Worker が無限ループ等でハングした場合でも確実に解放する
+    timeoutId = setTimeout(() => {
+      timeoutId = null;
+      cleanup();
+      reject(new Error(`Worker task timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    try {
+      w.postMessage({ ...message, id }, transferables);
+    } catch (error: unknown) {
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
 
 /**
  * Web Worker 経由で台形補正を適用する。
@@ -166,41 +237,17 @@ function workerApplyPerspectiveCorrection(
   imageData: WorkerImageData,
   params: PerspectiveParams,
 ): Promise<WorkerImageData> {
-  return new Promise((resolve, reject) => {
-    const w = ensureWorker();
-    const id = `task-${++taskIdCounter}`;
-
-    pendingTasks.set(id, { resolve, reject });
-
-    // 一時的なメッセージハンドラを設定（結果の受け取り用）
-    const handler = (e: MessageEvent) => {
-      if (e.data.id !== id) return;
-      w.removeEventListener("message", handler);
-
-      const task = pendingTasks.get(id);
-      pendingTasks.delete(id);
-
-      if (!task) return;
-
-      if (e.data.type === "result") {
-        task.resolve(e.data.imageData);
-      } else if (e.data.type === "error") {
-        task.reject(new Error(e.data.error));
-      }
-    };
-    w.addEventListener("message", handler);
-
-    // ImageData のバッファを Transferable として送信（ゼロコピー）
-    const copy = {
-      data: new Uint8ClampedArray(imageData.data),
-      width: imageData.width,
-      height: imageData.height,
-    };
-    w.postMessage(
-      { type: "perspective", id, imageData: copy, params },
-      [copy.data.buffer],
-    );
-  });
+  // 呼び出し元のバッファを保護するためコピーしてから Transfer で送信
+  const copy = {
+    data: new Uint8ClampedArray(imageData.data),
+    width: imageData.width,
+    height: imageData.height,
+  };
+  return sendWorkerTask(
+    { type: "perspective", imageData: copy, params },
+    (data) => data.imageData as WorkerImageData,
+    [copy.data.buffer],
+  );
 }
 
 /**
@@ -390,6 +437,7 @@ export function applySharpen(
  * 2. 回転（Canvas API）
  * 3. 明るさ・コントラスト（Canvas API filter）
  * 4. シャープネス（ピクセル演算）
+ * 5. 地色除去（RGB の各チャンネルが threshold 以上のピクセルを純白に置換）
  *
  * `correction.skipped` が true の場合は補正をスキップし、元画像をそのまま Canvas に描画して返す。
  */
@@ -426,7 +474,167 @@ export async function applyCorrections(
     current = applySharpen(current, sharpness);
   }
 
+  // 5. 地色除去
+  if (correction.adjustments?.backgroundRemoval) {
+    current = applyBackgroundRemoval(current);
+  }
+
   return current instanceof HTMLCanvasElement ? current : imageToCanvas(current);
+}
+
+// ---------------------------------------------------------------------------
+// ドキュメント輪郭自動検出（Worker 経由）
+// ---------------------------------------------------------------------------
+
+/**
+ * Web Worker 経由でドキュメントの4隅座標を自動検出する。
+ */
+function workerDetectDocumentPerspective(
+  imageData: WorkerImageData,
+): Promise<PerspectiveParams | null> {
+  const copy = {
+    data: new Uint8ClampedArray(imageData.data),
+    width: imageData.width,
+    height: imageData.height,
+  };
+  return sendWorkerTask(
+    { type: "detectDocument", imageData: copy },
+    (data) => (data.perspectiveParams as PerspectiveParams | null) ?? null,
+    [copy.data.buffer],
+  );
+}
+
+/**
+ * Web Worker 上の OpenCV.js を使用してドキュメントの4隅座標を自動検出する。
+ * Canny エッジ検出と輪郭近似により最大四角形領域を推定する。
+ * 検出できない場合は null を返す。
+ */
+export async function detectDocumentPerspective(
+  source: ImageSource,
+): Promise<PerspectiveParams | null> {
+  await initOpenCV();
+
+  const srcCanvas = imageToCanvas(source);
+  if (srcCanvas.width < 1 || srcCanvas.height < 1) {
+    return null;
+  }
+  const ctx = srcCanvas.getContext("2d")!;
+  const imgData = ctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+
+  const workerImageData: WorkerImageData = {
+    data: imgData.data,
+    width: imgData.width,
+    height: imgData.height,
+  };
+
+  return workerDetectDocumentPerspective(workerImageData);
+}
+
+// ---------------------------------------------------------------------------
+// 自動明るさ・コントラスト分析
+// ---------------------------------------------------------------------------
+
+/**
+ * 画像のヒストグラムを分析し、明るさとコントラストの自動補正値を提案する。
+ * ITU-R BT.601 輝度値の 2/98 パーセンタイルを基準に算出する。
+ *
+ * メインスレッドのブロック時間を削減するため、最大 400px に縮小した画像で分析する。
+ * 戻り値の contrast は 0〜100（自動補正はコントラストの増強のみ行い、負値は返さない）。
+ */
+export function analyzeImageAutoAdjustments(
+  source: ImageSource,
+): { brightness: number; contrast: number } {
+  const srcW = getSourceWidth(source);
+  const srcH = getSourceHeight(source);
+
+  if (srcW < 1 || srcH < 1) {
+    return { brightness: 0, contrast: 0 };
+  }
+
+  // 最大 400px に縮小してから分析（メインスレッドの全ピクセル走査コストを削減）
+  const ANALYSIS_MAX_SIDE = 400;
+  const scale = Math.min(1, ANALYSIS_MAX_SIDE / Math.max(srcW, srcH));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(srcW * scale));
+  canvas.height = Math.max(1, Math.round(srcH * scale));
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imgData.data;
+
+  // 輝度ヒストグラムを構築（256段階）
+  const histogram = new Array<number>(256).fill(0);
+  const totalPixels = canvas.width * canvas.height;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    histogram[lum]++;
+  }
+
+  // 指定パーセンタイルの輝度値を取得する
+  const findPercentile = (pct: number): number => {
+    const target = totalPixels * pct;
+    let count = 0;
+    for (let v = 0; v < 256; v++) {
+      count += histogram[v];
+      if (count >= target) return v;
+    }
+    return 255;
+  };
+
+  const darkPoint = findPercentile(0.02);   // 2パーセンタイル（暗部）
+  const whitePoint = findPercentile(0.98);  // 98パーセンタイル（紙の色）
+
+  // 明るさ：紙が白（230以上）になるよう調整
+  const brightness = Math.round((230 - whitePoint) * 0.5);
+
+  // コントラスト：ダイナミックレンジが狭い場合に増強
+  const dynamicRange = whitePoint - darkPoint;
+  const contrast = Math.round((230 - dynamicRange) / 230 * 40);
+
+  return {
+    brightness: Math.max(-100, Math.min(100, brightness)),
+    contrast: Math.max(0, Math.min(100, contrast)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 地色除去（Background Removal）
+// ---------------------------------------------------------------------------
+
+/**
+ * RGB の各チャンネルがすべて threshold 以上のピクセルを純白（255,255,255）に置換する。
+ * 紙の地色（クリーム・薄黄色など）を除去して背景を白くする。
+ * threshold は 0〜255 の範囲（デフォルト: 230）。範囲外の値は自動的にクランプする。
+ */
+export function applyBackgroundRemoval(
+  source: ImageSource,
+  threshold = 230,
+): HTMLCanvasElement {
+  const t = Math.max(0, Math.min(255, threshold));
+  const inputCanvas = source instanceof HTMLCanvasElement ? source : imageToCanvas(source);
+  if (inputCanvas.width < 1 || inputCanvas.height < 1) {
+    return inputCanvas;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = inputCanvas.width;
+  canvas.height = inputCanvas.height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(inputCanvas, 0, 0);
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imgData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] >= t && data[i + 1] >= t && data[i + 2] >= t) {
+      data[i] = 255;
+      data[i + 1] = 255;
+      data[i + 2] = 255;
+      // alpha は変更しない
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
 }
 
 // ---------------------------------------------------------------------------
