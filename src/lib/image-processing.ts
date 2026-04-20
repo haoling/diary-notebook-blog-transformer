@@ -154,17 +154,24 @@ let taskIdCounter = 0;
 /**
  * Web Worker へタスクを送信し、結果を Promise で返す共通ヘルパー。
  * メッセージ種別と結果抽出ロジックのみ呼び出し元で差し替える。
+ * timeoutMs 以内に応答がなければ reject してリスナーを解放する（デフォルト 30 秒）。
  */
 function sendWorkerTask<T>(
   message: Record<string, unknown>,
   extractResult: (data: MessageEvent["data"]) => T,
   transferables: Transferable[] = [],
+  timeoutMs = 30_000,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const w = ensureWorker();
     const id = `task-${++taskIdCounter}`;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const cleanup = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
       w.removeEventListener("message", handler);
       w.removeEventListener("error", workerErrorHandler);
       w.removeEventListener("messageerror", workerErrorHandler);
@@ -195,6 +202,13 @@ function sendWorkerTask<T>(
     w.addEventListener("message", handler);
     w.addEventListener("error", workerErrorHandler);
     w.addEventListener("messageerror", workerErrorHandler);
+
+    // Worker が無限ループ等でハングした場合でも確実に解放する
+    timeoutId = setTimeout(() => {
+      timeoutId = null;
+      cleanup();
+      reject(new Error(`Worker task timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
 
     try {
       w.postMessage({ ...message, id }, transferables);
