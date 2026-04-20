@@ -192,9 +192,9 @@ function sendWorkerTask<T>(
 
     try {
       w.postMessage({ ...message, id }, transferables);
-    } catch (error) {
+    } catch (error: unknown) {
       cleanup();
-      reject(error);
+      reject(error instanceof Error ? error : new Error(String(error)));
     }
   });
 }
@@ -504,12 +504,25 @@ export async function detectDocumentPerspective(
 /**
  * 画像のヒストグラムを分析し、明るさとコントラストの自動補正値を提案する。
  * ITU-R BT.601 輝度値の 2/98 パーセンタイルを基準に算出する。
+ *
+ * メインスレッドのブロック時間を削減するため、最大 400px に縮小した画像で分析する。
+ * 戻り値の contrast は 0〜100（自動補正はコントラストの増強のみ行い、負値は返さない）。
  */
 export function analyzeImageAutoAdjustments(
   source: ImageSource,
 ): { brightness: number; contrast: number } {
-  const canvas = imageToCanvas(source);
+  const srcW = getSourceWidth(source);
+  const srcH = getSourceHeight(source);
+
+  // 最大 400px に縮小してから分析（メインスレッドの全ピクセル走査コストを削減）
+  const ANALYSIS_MAX_SIDE = 400;
+  const scale = Math.min(1, ANALYSIS_MAX_SIDE / Math.max(srcW, srcH));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(srcW * scale);
+  canvas.height = Math.round(srcH * scale);
   const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(imageToCanvas(source), 0, 0, canvas.width, canvas.height);
+
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imgData.data;
 
@@ -555,19 +568,20 @@ export function analyzeImageAutoAdjustments(
 /**
  * RGB の各チャンネルがすべて threshold 以上のピクセルを純白（255,255,255）に置換する。
  * 紙の地色（クリーム・薄黄色など）を除去して背景を白くする。
- * threshold は 0〜255 の範囲（デフォルト: 230）。
+ * threshold は 0〜255 の範囲（デフォルト: 230）。範囲外の値は自動的にクランプする。
  */
 export function applyBackgroundRemoval(
   source: ImageSource,
   threshold = 230,
 ): HTMLCanvasElement {
+  const t = Math.max(0, Math.min(255, threshold));
   const canvas = imageToCanvas(source);
   const ctx = canvas.getContext("2d")!;
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imgData.data;
 
   for (let i = 0; i < data.length; i += 4) {
-    if (data[i] >= threshold && data[i + 1] >= threshold && data[i + 2] >= threshold) {
+    if (data[i] >= t && data[i + 1] >= t && data[i + 2] >= t) {
       data[i] = 255;
       data[i + 1] = 255;
       data[i + 2] = 255;

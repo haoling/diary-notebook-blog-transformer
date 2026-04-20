@@ -552,7 +552,7 @@ export function PerspectiveCorrectionUI({
                   : "bg-amber-100 text-amber-700"
               }`}
             >
-              {autoCorrectMessage.text}
+              <span role="status" aria-live="polite">{autoCorrectMessage.text}</span>
             </span>
           )}
         </div>
