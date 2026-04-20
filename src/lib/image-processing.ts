@@ -595,8 +595,12 @@ export function applyBackgroundRemoval(
   threshold = 230,
 ): HTMLCanvasElement {
   const t = Math.max(0, Math.min(255, threshold));
-  const canvas = source instanceof HTMLCanvasElement ? source : imageToCanvas(source);
+  const inputCanvas = source instanceof HTMLCanvasElement ? source : imageToCanvas(source);
+  const canvas = document.createElement("canvas");
+  canvas.width = inputCanvas.width;
+  canvas.height = inputCanvas.height;
   const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(inputCanvas, 0, 0);
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imgData.data;
 
