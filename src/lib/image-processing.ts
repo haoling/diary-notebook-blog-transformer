@@ -187,7 +187,11 @@ function sendWorkerTask<T>(
       if (e.data.id !== id) return;
       cleanup();
       if (e.data.type === "result") {
-        resolve(extractResult(e.data));
+        try {
+          resolve(extractResult(e.data));
+        } catch (error: unknown) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
       } else if (e.data.type === "error") {
         reject(new Error(e.data.error));
       }
@@ -196,7 +200,13 @@ function sendWorkerTask<T>(
     // Worker クラッシュ・応答不能時にリスナーが残らないよう reject して解放する
     const workerErrorHandler = (e: ErrorEvent | MessageEvent) => {
       cleanup();
-      reject(new Error((e as ErrorEvent).message ?? "Worker error"));
+      const errorMessage =
+        e.type === "messageerror"
+          ? `Worker message error: failed to deserialize worker message (${String(e)})`
+          : e instanceof ErrorEvent && e.message
+            ? e.message
+            : "Worker error";
+      reject(new Error(errorMessage));
     };
 
     w.addEventListener("message", handler);
