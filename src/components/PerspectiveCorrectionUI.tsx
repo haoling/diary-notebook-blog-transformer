@@ -497,10 +497,8 @@ export function PerspectiveCorrectionUI({
         img.src = imageUrl;
       });
 
-      const [perspParams, autoAdj] = await Promise.all([
-        detectDocumentPerspective(img),
-        analyzeImageAutoAdjustments(img),
-      ]);
+      const perspParams = await detectDocumentPerspective(img);
+      const autoAdj = analyzeImageAutoAdjustments(img);
 
       if (!mountedRef.current) return;
       if (perspParams) {
