@@ -227,7 +227,7 @@ function workerApplyPerspectiveCorrection(
   imageData: WorkerImageData,
   params: PerspectiveParams,
 ): Promise<WorkerImageData> {
-  // ImageData のバッファを Transferable として送信（ゼロコピー）
+  // 呼び出し元のバッファを保護するためコピーしてから Transfer で送信
   const copy = {
     data: new Uint8ClampedArray(imageData.data),
     width: imageData.width,
