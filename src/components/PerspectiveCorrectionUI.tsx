@@ -487,8 +487,8 @@ export function PerspectiveCorrectionUI({
       const img = new Image();
       img.crossOrigin = "anonymous";
       await new Promise<void>((resolve, reject) => {
-        img.addEventListener("load", () => resolve());
-        img.addEventListener("error", () => reject(new Error("画像の読み込みに失敗しました。")));
+        img.addEventListener("load", () => resolve(), { once: true });
+        img.addEventListener("error", () => reject(new Error("画像の読み込みに失敗しました。")), { once: true });
         img.src = imageUrl;
       });
 
