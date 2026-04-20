@@ -515,6 +515,9 @@ export async function detectDocumentPerspective(
   await initOpenCV();
 
   const srcCanvas = imageToCanvas(source);
+  if (srcCanvas.width < 1 || srcCanvas.height < 1) {
+    return null;
+  }
   const ctx = srcCanvas.getContext("2d")!;
   const imgData = ctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
 
@@ -543,6 +546,10 @@ export function analyzeImageAutoAdjustments(
 ): { brightness: number; contrast: number } {
   const srcW = getSourceWidth(source);
   const srcH = getSourceHeight(source);
+
+  if (srcW < 1 || srcH < 1) {
+    return { brightness: 0, contrast: 0 };
+  }
 
   // 最大 400px に縮小してから分析（メインスレッドの全ピクセル走査コストを削減）
   const ANALYSIS_MAX_SIDE = 400;
@@ -606,6 +613,9 @@ export function applyBackgroundRemoval(
 ): HTMLCanvasElement {
   const t = Math.max(0, Math.min(255, threshold));
   const inputCanvas = source instanceof HTMLCanvasElement ? source : imageToCanvas(source);
+  if (inputCanvas.width < 1 || inputCanvas.height < 1) {
+    return inputCanvas;
+  }
   const canvas = document.createElement("canvas");
   canvas.width = inputCanvas.width;
   canvas.height = inputCanvas.height;

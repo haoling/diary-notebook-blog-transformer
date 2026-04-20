@@ -349,6 +349,25 @@ export function PerspectiveCorrectionUI({
     setDraggingCorner(null);
   }, []);
 
+  // ---- CorrectionResult 組み立てヘルパー（プレビューと保存で共用） ----
+
+  const buildCorrectionResult = useCallback((): CorrectionResult => ({
+    correctedAt: new Date().toISOString(),
+    skipped: false,
+    ...(usePerspective && perspective ? { perspective } : {}),
+    ...(rotation !== 0 ? { rotation } : {}),
+    ...((brightness !== 0 || contrast !== 0 || sharpness > 0 || backgroundRemoval)
+      ? {
+          adjustments: {
+            ...(brightness !== 0 ? { brightness } : {}),
+            ...(contrast !== 0 ? { contrast } : {}),
+            ...(sharpness > 0 ? { sharpness } : {}),
+            ...(backgroundRemoval ? { backgroundRemoval: true } : {}),
+          },
+        }
+      : {}),
+  }), [usePerspective, perspective, rotation, brightness, contrast, sharpness, backgroundRemoval]);
+
   // ---- プレビューのデバウンス更新 ----
 
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -379,22 +398,7 @@ export function PerspectiveCorrectionUI({
           img.src = imageUrl;
         });
 
-        const correction: CorrectionResult = {
-          correctedAt: new Date().toISOString(),
-          skipped: false,
-          ...(usePerspective && perspective ? { perspective } : {}),
-          ...(rotation !== 0 ? { rotation } : {}),
-          ...((brightness !== 0 || contrast !== 0 || sharpness > 0 || backgroundRemoval)
-            ? {
-                adjustments: {
-                  ...(brightness !== 0 ? { brightness } : {}),
-                  ...(contrast !== 0 ? { contrast } : {}),
-                  ...(sharpness > 0 ? { sharpness } : {}),
-                  ...(backgroundRemoval ? { backgroundRemoval: true } : {}),
-                },
-              }
-            : {}),
-        };
+        const correction = buildCorrectionResult();
 
         const resultCanvas = await applyCorrections(img, correction);
 
@@ -430,7 +434,7 @@ export function PerspectiveCorrectionUI({
       previewRequestIdRef.current = -1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageUrl, imageSize, usePerspective, perspective, rotation, brightness, contrast, sharpness, backgroundRemoval]);
+  }, [imageUrl, imageSize, buildCorrectionResult]);
 
   // ---- プレビュー URL のクリーンアップ ----
 
@@ -445,24 +449,8 @@ export function PerspectiveCorrectionUI({
   // ---- 保存 ----
 
   const handleSave = useCallback(() => {
-    const correction: CorrectionResult = {
-      correctedAt: new Date().toISOString(),
-      skipped: false,
-      ...(usePerspective && perspective ? { perspective } : {}),
-      ...(rotation !== 0 ? { rotation } : {}),
-      ...((brightness !== 0 || contrast !== 0 || sharpness > 0 || backgroundRemoval)
-        ? {
-            adjustments: {
-              ...(brightness !== 0 ? { brightness } : {}),
-              ...(contrast !== 0 ? { contrast } : {}),
-              ...(sharpness > 0 ? { sharpness } : {}),
-              ...(backgroundRemoval ? { backgroundRemoval: true } : {}),
-            },
-          }
-        : {}),
-    };
-    onSave(correction);
-  }, [usePerspective, perspective, rotation, brightness, contrast, sharpness, backgroundRemoval, onSave]);
+    onSave(buildCorrectionResult());
+  }, [buildCorrectionResult, onSave]);
 
   const handleSkip = useCallback(() => {
     onSave({
