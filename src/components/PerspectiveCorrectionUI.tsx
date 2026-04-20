@@ -216,6 +216,11 @@ export function PerspectiveCorrectionUI({
   );
   const [autoCorrectLoading, setAutoCorrectLoading] = useState(false);
   const [autoCorrectMessage, setAutoCorrectMessage] = useState<{ type: "success" | "warn"; text: string } | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -497,6 +502,7 @@ export function PerspectiveCorrectionUI({
         analyzeImageAutoAdjustments(img),
       ]);
 
+      if (!mountedRef.current) return;
       if (perspParams) {
         setPerspective(perspParams);
         setUsePerspective(true);
@@ -508,10 +514,11 @@ export function PerspectiveCorrectionUI({
       setContrast(autoAdj.contrast);
       setBackgroundRemoval(true);
     } catch (err) {
+      if (!mountedRef.current) return;
       console.error("自動補正に失敗しました:", err);
       setAutoCorrectMessage({ type: "warn", text: "自動補正に失敗しました。手動で調整してください。" });
     } finally {
-      setAutoCorrectLoading(false);
+      if (mountedRef.current) setAutoCorrectLoading(false);
     }
   }, [imageUrl, imageSize]);
 

@@ -202,7 +202,7 @@ function sendWorkerTask<T>(
       cleanup();
       const errorMessage =
         e.type === "messageerror"
-          ? `Worker message error: failed to deserialize worker message (${String(e)})`
+          ? `Worker messageerror: could not deserialize message (type=${e.type})`
           : e instanceof ErrorEvent && e.message
             ? e.message
             : "Worker error";
