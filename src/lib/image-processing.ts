@@ -555,8 +555,8 @@ export function analyzeImageAutoAdjustments(
   const ANALYSIS_MAX_SIDE = 400;
   const scale = Math.min(1, ANALYSIS_MAX_SIDE / Math.max(srcW, srcH));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(srcW * scale);
-  canvas.height = Math.round(srcH * scale);
+  canvas.width = Math.max(1, Math.round(srcW * scale));
+  canvas.height = Math.max(1, Math.round(srcH * scale));
   const ctx = canvas.getContext("2d")!;
   ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
 
