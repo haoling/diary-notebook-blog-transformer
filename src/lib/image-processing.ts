@@ -171,6 +171,12 @@ function sendWorkerTask<T>(
     };
 
     const handler = (e: MessageEvent) => {
+      // id なしのグローバルエラー（OpenCV 初期化失敗など）もタスクに伝播させる
+      if (e.data.type === "error" && !e.data.id) {
+        cleanup();
+        reject(new Error(e.data.error ?? "Worker error"));
+        return;
+      }
       if (e.data.id !== id) return;
       cleanup();
       if (e.data.type === "result") {
@@ -521,7 +527,7 @@ export function analyzeImageAutoAdjustments(
   canvas.width = Math.round(srcW * scale);
   canvas.height = Math.round(srcH * scale);
   const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(imageToCanvas(source), 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
 
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = imgData.data;
