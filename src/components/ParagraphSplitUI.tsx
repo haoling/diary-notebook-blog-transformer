@@ -206,6 +206,9 @@ export function ParagraphSplitUI({
 
         if (cancelled) return;
 
+        // 補正後の画像サイズを imageSize に設定（台形補正等でサイズが変わるため）
+        setImageSize({ width: resultCanvas.width, height: resultCanvas.height });
+
         // 補正済み画像のURLを生成
         const blob = await new Promise<Blob>((resolve) => {
           resultCanvas.toBlob((b) => resolve(b!), "image/png");
@@ -345,8 +348,8 @@ export function ParagraphSplitUI({
     e.preventDefault();
     e.stopPropagation();
     setDraggingIndex(index);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, []);
+    containerRef.current?.setPointerCapture(e.pointerId);
+  }, [containerRef]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (draggingIndex === null || !containerRef.current || !imageSize) return;
