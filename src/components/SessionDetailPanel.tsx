@@ -7,8 +7,9 @@ import { createDriveClient } from "@/lib/drive-client";
 import { ImageCaptureModule } from "@/components/ImageCaptureModule";
 import { ScannerUploadModule } from "@/components/ScannerUploadModule";
 import { PerspectiveCorrectionUI } from "@/components/PerspectiveCorrectionUI";
+import { ParagraphSplitUI } from "@/components/ParagraphSplitUI";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import type { ScanSession, ScanPage, CorrectionResult } from "@/types/scan";
+import type { ScanSession, ScanPage, CorrectionResult, SplitResult } from "@/types/scan";
 
 // ---------------------------------------------------------------------------
 // 定数・ユーティリティ
@@ -51,12 +52,25 @@ function correctionBadge(session: ScanSession): string | null {
   return `${done}/${total}`;
 }
 
+function splitProgress(session: ScanSession): { done: number; total: number } {
+  const total = session.pages.filter((p) => p.correction !== undefined).length;
+  const done = session.pages.filter((p) => p.split !== undefined).length;
+  return { done, total };
+}
+
+function splitBadge(session: ScanSession): string | null {
+  const { done, total } = splitProgress(session);
+  if (total === 0) return null;
+  return `${done}/${total}`;
+}
+
 function StepNav({ currentStep, onStepChange, session }: StepNavProps) {
   return (
     <nav className="flex items-center gap-1 overflow-x-auto pb-1" aria-label="処理ステップ">
       {STEPS.map((step, idx) => {
         const isActive = currentStep === step.id;
-        const isClickable = step.id === "capture" || step.id === "correction";
+        const hasCorrectedPages = session.pages.some((p) => p.correction !== undefined);
+        const isClickable = step.id === "capture" || step.id === "correction" || (step.id === "split" && hasCorrectedPages);
         const badge =
           step.id === "capture"
             ? session.pages.length > 0
@@ -64,7 +78,9 @@ function StepNav({ currentStep, onStepChange, session }: StepNavProps) {
               : null
             : step.id === "correction"
               ? correctionBadge(session)
-              : null;
+              : step.id === "split"
+                ? splitBadge(session)
+                : null;
 
         return (
           <div key={step.id} className="flex items-center">
@@ -276,6 +292,93 @@ function CorrectionPageCard({ page, accessToken, onSelect }: CorrectionPageCardP
 }
 
 // ---------------------------------------------------------------------------
+// 分割ステップ：ページ一覧
+// ---------------------------------------------------------------------------
+
+type SplitPageCardProps = {
+  page: ScanPage;
+  accessToken: string;
+  onSelect: () => void;
+};
+
+function SplitPageCard({ page, accessToken, onSelect }: SplitPageCardProps) {
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    const client = createDriveClient(accessToken);
+
+    async function loadThumbnail() {
+      setLoading(true);
+      try {
+        const blob = await client.getFileBlob(page.originalFileId);
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setThumbnailUrl(objectUrl);
+      } catch {
+        if (!cancelled) setThumbnailUrl(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadThumbnail();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [page.originalFileId, accessToken]);
+
+  const statusLabel = page.split === undefined
+    ? "未分割"
+    : page.split.paragraphs.length === 0
+      ? "分割なし"
+      : `${page.split.paragraphs.length}段落`;
+
+  const statusColor = page.split === undefined
+    ? "bg-amber-100 text-amber-700"
+    : "bg-green-100 text-green-700";
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="group relative rounded-lg border border-slate-200 bg-white overflow-hidden shadow-sm hover:border-blue-400 hover:shadow-md transition-all text-left"
+    >
+      <div className="aspect-[3/4] bg-slate-100">
+        {loading && (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-slate-300 text-sm">読み込み中...</div>
+          </div>
+        )}
+        {thumbnailUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumbnailUrl}
+            alt={`ページ ${page.id}`}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        )}
+      </div>
+      <div className="p-2 flex items-center justify-between">
+        <p className="text-xs text-slate-500">{formatDateTime(page.capturedAt)}</p>
+        <span className={`text-[10px] font-medium rounded-full px-1.5 py-0.5 ${statusColor}`}>
+          {statusLabel}
+        </span>
+      </div>
+      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 rounded-lg">
+        <span className="rounded-lg bg-white/90 px-3 py-1.5 text-sm font-medium text-slate-700 shadow">
+          分割する
+        </span>
+      </div>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // メインコンポーネント
 // ---------------------------------------------------------------------------
 
@@ -303,6 +406,10 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
   // 補正用の画像 Blob URL
   const [correctionImageUrl, setCorrectionImageUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // 分割用の状態
+  const [splittingPageId, setSplittingPageId] = useState<string | null>(null);
+  const [splitImageUrl, setSplitImageUrl] = useState<string | null>(null);
 
   const loadSession = useCallback(async () => {
     if (!sessionManager || !sessionId) return;
@@ -416,6 +523,62 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
       if (correctionImageUrl) URL.revokeObjectURL(correctionImageUrl);
     };
   }, [correctionImageUrl]);
+
+  // ---- 分割ハンドラ ----
+
+  const handleSelectPageForSplit = useCallback(
+    async (page: ScanPage) => {
+      if (!accessToken) return;
+      setOperationError(null);
+      try {
+        const client = createDriveClient(accessToken);
+        const blob = await client.getFileBlob(page.originalFileId);
+        const url = URL.createObjectURL(blob);
+        setSplitImageUrl(url);
+        setSplittingPageId(page.id);
+      } catch (err) {
+        setOperationError(err instanceof Error ? err.message : "画像の読み込みに失敗しました。");
+      }
+    },
+    [accessToken],
+  );
+
+  const handleSaveSplit = useCallback(
+    async (split: SplitResult) => {
+      if (!sessionManager || !sessionId || !splittingPageId) return;
+      setSaving(true);
+      setOperationError(null);
+      try {
+        await sessionManager.updatePageSplit(sessionId, splittingPageId, split);
+        setSplittingPageId(null);
+        if (splitImageUrl) {
+          URL.revokeObjectURL(splitImageUrl);
+          setSplitImageUrl(null);
+        }
+        await loadSession();
+      } catch (err) {
+        setOperationError(err instanceof Error ? err.message : "分割結果の保存に失敗しました。");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [sessionManager, sessionId, splittingPageId, splitImageUrl, loadSession],
+  );
+
+  const handleCancelSplit = useCallback(() => {
+    setSplittingPageId(null);
+    if (splitImageUrl) {
+      URL.revokeObjectURL(splitImageUrl);
+      setSplitImageUrl(null);
+    }
+  }, [splitImageUrl]);
+
+  // 分割用 URL のクリーンアップ
+  useEffect(() => {
+    return () => {
+      if (splitImageUrl) URL.revokeObjectURL(splitImageUrl);
+    };
+  }, [splitImageUrl]);
 
   // ---- レンダリング ----
 
@@ -600,14 +763,67 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
         </div>
       )}
 
-      {/* Step 3: 段落分割（準備中） */}
+      {/* Step 3: 段落分割 */}
       {activeStep === "split" && (
-        <div className="text-center py-16">
-          <div className="text-5xl mb-4">📝</div>
-          <p className="text-lg text-slate-500 mb-2">段落分割（準備中）</p>
-          <p className="text-sm text-slate-400">
-            補正済みの画像から水平罫線・余白で文節境界を自動検出する機能です。
-          </p>
+        <div>
+          {splittingPageId && splitImageUrl ? (
+            <div>
+              <button
+                type="button"
+                onClick={handleCancelSplit}
+                disabled={saving}
+                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 mb-4 disabled:opacity-50"
+              >
+                ← 分割ページ一覧に戻る
+              </button>
+
+              {operationError && (
+                <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                  {operationError}
+                </div>
+              )}
+
+              <ParagraphSplitUI
+                imageUrl={splitImageUrl}
+                correction={session.pages.find((p) => p.id === splittingPageId)?.correction}
+                existingSplit={session.pages.find((p) => p.id === splittingPageId)?.split}
+                onSave={handleSaveSplit}
+                onCancel={handleCancelSplit}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold text-slate-800 mb-1">📝 段落分割</h2>
+                <p className="text-sm text-slate-500">
+                  補正済みのページをクリックして、水平罫線・余白で段落境界を自動検出または手動で分割します。
+                </p>
+              </div>
+
+              {session.pages.filter((p) => p.correction !== undefined).length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="text-5xl mb-4">✂️</div>
+                  <p className="text-lg text-slate-500 mb-2">補正済みのページがありません</p>
+                  <p className="text-sm text-slate-400">
+                    まず「補正」ステップで画像を補正してください。
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                  {session.pages
+                    .filter((p) => p.correction !== undefined)
+                    .map((page) => (
+                      <SplitPageCard
+                        key={page.id}
+                        page={page}
+                        accessToken={accessToken ?? ""}
+                        onSelect={() => handleSelectPageForSplit(page)}
+                      />
+                    ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 

@@ -2,7 +2,7 @@ import { DriveClient } from "./drive-client";
 import { DriveNotFoundError } from "./drive-errors";
 import { SettingsManager } from "./settings-manager";
 import { IndexManager } from "./index-manager";
-import type { ScanSession, ScanPage, CorrectionResult } from "@/types/scan";
+import type { ScanSession, ScanPage, CorrectionResult, SplitResult } from "@/types/scan";
 
 const SESSION_FILE_PREFIX = "session_";
 
@@ -235,6 +235,20 @@ export class SessionManager {
       }
 
       page.correction = correction;
+      await this.saveSession(session);
+    });
+  }
+
+  /** ページの段落分割結果を更新して保存する。 */
+  async updatePageSplit(sessionId: string, pageId: string, split: SplitResult): Promise<void> {
+    await this.runSerialized(sessionId, async () => {
+      const { session } = await this.loadSessionWithFileId(sessionId);
+      const page = session.pages.find((p) => p.id === pageId);
+      if (!page) {
+        throw new Error(`ページ ${pageId} がセッション ${sessionId} に見つかりません。`);
+      }
+
+      page.split = split;
       await this.saveSession(session);
     });
   }

@@ -345,6 +345,197 @@ function detectDocumentCorners(imageData) {
 }
 
 // ---------------------------------------------------------------------------
+// 段落境界検出（Paragraph Split Detection）
+// ---------------------------------------------------------------------------
+
+/**
+ * OpenCV.js を使用して水平罫線と余白から段落境界を検出する。
+ *
+ * アルゴリズム:
+ * 1. グレースケール → ガウシアンブラー
+ * 2. Canny エッジ検出
+ * 3. HoughLinesP で線分を検出
+ * 4. 水平に近い線分（角度±15°以内）を抽出
+ * 5. Y座標が近い線分をクラスタリングして代表Y座標を算出
+ * 6. 行ごとのピクセル投射密度を計算して、余白（テキスト密度の谷）を検出
+ * 7. 罫線のY座標と余白のY座標を統合して段落境界のY座標配列を生成
+ *
+ * @param {{ data: Uint8ClampedArray, width: number, height: number }} imageData
+ * @param {{ minLineLength?: number, maxAngleDeg?: number, whitespaceThreshold?: number }} options
+ * @returns {{ splitYs: number[] }}
+ */
+function detectParagraphBoundaries(imageData, options = {}) {
+  const {
+    minLineLength = imageData.width * 0.15,
+    maxAngleDeg = 15,
+    whitespaceThreshold = 0.03,
+  } = options;
+
+  const { data, width: srcWidth, height: srcHeight } = imageData;
+  const srcMat = cv.matFromImageData({ data, width: srcWidth, height: srcHeight });
+
+  let grayMat = null;
+  let blurMat = null;
+  let edgeMat = null;
+  let linesMat = null;
+  let projection = null;
+
+  try {
+    // グレースケール
+    grayMat = new cv.Mat();
+    cv.cvtColor(srcMat, grayMat, cv.COLOR_RGBA2GRAY);
+
+    // ガウシアンブラー
+    blurMat = new cv.Mat();
+    const kSize = Math.min(5, Math.max(3, Math.round(Math.min(srcWidth, srcHeight) / 200)));
+    const k = kSize % 2 === 0 ? kSize + 1 : kSize;
+    cv.GaussianBlur(grayMat, blurMat, new cv.Size(k, k), 0);
+
+    // Canny エッジ検出
+    edgeMat = new cv.Mat();
+    cv.Canny(blurMat, edgeMat, 50, 150);
+
+    // HoughLinesP で線分検出
+    linesMat = new cv.Mat();
+    const minLinePx = Math.max(20, Math.round(minLineLength));
+    cv.HoughLinesP(edgeMat, linesMat, 1, Math.PI / 180, 50, minLinePx, 10);
+
+    // 水平に近い線分を抽出（角度±maxAngleDeg度以内）
+    const maxAngleRad = (maxAngleDeg * Math.PI) / 180;
+    const lineYs = [];
+    for (let i = 0; i < linesMat.rows; i++) {
+      const x1 = linesMat.data32S[i * 4];
+      const y1 = linesMat.data32S[i * 4 + 1];
+      const x2 = linesMat.data32S[i * 4 + 2];
+      const y2 = linesMat.data32S[i * 4 + 3];
+
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const length = Math.hypot(dx, dy);
+      if (length < 1) continue;
+
+      const angle = Math.abs(Math.atan2(dy, dx));
+      // 水平: angle ≈ 0 または angle ≈ π
+      if (angle <= maxAngleRad || angle >= Math.PI - maxAngleRad) {
+        const avgY = Math.round((y1 + y2) / 2);
+        lineYs.push(avgY);
+      }
+    }
+
+    // Y座標のクラスタリング（近いY座標をまとめる）
+    const CLUSTER_DISTANCE = Math.max(5, Math.round(srcHeight * 0.008));
+    const sorted = [...lineYs].sort((a, b) => a - b);
+    const lineClusters = [];
+    let clusterCenter = sorted.length > 0 ? sorted[0] : 0;
+    let clusterCount = 0;
+    for (const y of sorted) {
+      if (Math.abs(y - clusterCenter) <= CLUSTER_DISTANCE) {
+        clusterCenter = Math.round((clusterCenter * clusterCount + y) / (clusterCount + 1));
+        clusterCount++;
+      } else {
+        if (clusterCount >= 1) lineClusters.push(clusterCenter);
+        clusterCenter = y;
+        clusterCount = 1;
+      }
+    }
+    if (clusterCount >= 1) lineClusters.push(clusterCenter);
+
+    // 行投影密度（水平方向のピクセル数を各行でカウント）
+    projection = new cv.Mat();
+    cv.reduce(edgeMat, projection, 1, cv.REDUCE_SUM, cv.CV_32S);
+
+    // 投影値から移動平均を計算してノイズを平滑化
+    const WINDOW_SIZE = Math.max(3, Math.round(srcHeight * 0.01));
+    const projData = projection.data32S;
+    const smoothed = new Float32Array(srcHeight);
+    for (let y = 0; y < srcHeight; y++) {
+      let sum = 0;
+      let count = 0;
+      const halfW = Math.floor(WINDOW_SIZE / 2);
+      for (let dy = -halfW; dy <= halfW; dy++) {
+        const yy = y + dy;
+        if (yy >= 0 && yy < srcHeight) {
+          sum += projData[yy];
+          count++;
+        }
+      }
+      smoothed[y] = sum / count;
+    }
+
+    // 最大投影値で正規化
+    let maxProj = 0;
+    for (let y = 0; y < srcHeight; y++) {
+      if (smoothed[y] > maxProj) maxProj = smoothed[y];
+    }
+    const normalized = maxProj > 0
+      ? smoothed.map((v) => v / maxProj)
+      : new Float32Array(srcHeight);
+
+    // 連続する余白（低密度）領域の中心を検出
+    const whitespaceCenters = [];
+    let wsStart = -1;
+    for (let y = 0; y < srcHeight; y++) {
+      if (normalized[y] < whitespaceThreshold) {
+        if (wsStart < 0) wsStart = y;
+      } else {
+        if (wsStart >= 0) {
+          const center = Math.round((wsStart + y - 1) / 2);
+          // 余白が十分に広い場合のみ採用（画像高さの1%以上）
+          if (y - wsStart >= Math.max(3, Math.round(srcHeight * 0.01))) {
+            whitespaceCenters.push(center);
+          }
+          wsStart = -1;
+        }
+      }
+    }
+    if (wsStart >= 0) {
+      const center = Math.round((wsStart + srcHeight - 1) / 2);
+      if (srcHeight - wsStart >= Math.max(3, Math.round(srcHeight * 0.01))) {
+        whitespaceCenters.push(center);
+      }
+    }
+
+    // 罫線と余白を統合して最終的な分割Y座標配列を生成
+    const allSplitYs = new Set();
+
+    // 罫線のY座標をそのまま追加
+    for (const y of lineClusters) {
+      if (y > 0 && y < srcHeight - 1) {
+        allSplitYs.add(y);
+      }
+    }
+
+    // 余白の中心を追加（罫線に近い場合は罫線を優先）
+    const MERGE_DISTANCE = Math.max(8, Math.round(srcHeight * 0.012));
+    for (const wsY of whitespaceCenters) {
+      let nearLine = false;
+      for (const lineY of lineClusters) {
+        if (Math.abs(wsY - lineY) <= MERGE_DISTANCE) {
+          nearLine = true;
+          break;
+        }
+      }
+      if (!nearLine && wsY > 0 && wsY < srcHeight - 1) {
+        allSplitYs.add(wsY);
+      }
+    }
+
+    // 最終的な分割Y座標をソート
+    const splitYs = [...allSplitYs].sort((a, b) => a - b);
+
+    return { splitYs };
+
+  } finally {
+    projection?.delete();
+    linesMat?.delete();
+    edgeMat?.delete();
+    blurMat?.delete();
+    grayMat?.delete();
+    srcMat.delete();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // メッセージハンドラ
 // ---------------------------------------------------------------------------
 
@@ -367,6 +558,13 @@ self.onmessage = async (e) => {
         await initOpenCV();
         const perspectiveParams = detectDocumentCorners(e.data.imageData);
         self.postMessage({ type: "result", id, perspectiveParams });
+        break;
+      }
+      case "detectParagraphs": {
+        await initOpenCV();
+        const options = e.data.options || {};
+        const result = detectParagraphBoundaries(e.data.imageData, options);
+        self.postMessage({ type: "result", id, paragraphBoundaries: result });
         break;
       }
       default:
