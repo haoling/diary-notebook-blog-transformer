@@ -42,9 +42,8 @@ type ParagraphBoundariesResult = {
 function workerDetectParagraphs(
   imageData: WorkerImageData,
   options?: {
-    minLineLength?: number;
-    maxAngleDeg?: number;
-    whitespaceThreshold?: number;
+    minGapRatio?: number;
+    densityThreshold?: number;
   },
 ): Promise<ParagraphBoundariesResult> {
   return new Promise((resolve, reject) => {
@@ -102,17 +101,16 @@ function workerDetectParagraphs(
 
 /** 段落境界検出のオプション。 */
 export type DetectParagraphsOptions = {
-  /** 最小線分長（ピクセル）。画像幅に対する比率。デフォルト: 0.15 */
-  minLineLengthRatio?: number;
-  /** 水平と判定する最大角度（度）。デフォルト: 15 */
-  maxAngleDeg?: number;
-  /** 余白と判定する投射密度の閾値（0〜1）。デフォルト: 0.03 */
-  whitespaceThreshold?: number;
+  /** 段落間の最小ギャップ高さ（画像高さに対する比率）。デフォルト: 0.03 */
+  minGapRatio?: number;
+  /** テキスト密度の閾値（0〜1）。これ以下を余白と判定。デフォルト: 0.05 */
+  densityThreshold?: number;
 };
 
 /**
  * 画像から段落境界のY座標配列を検出する。
- * OpenCV.js の HoughLinesP で水平罫線を、行投射密度で余白を検出する。
+ * 形態素演算でテキスト領域を結合し、投射密度の大きな谷を段落境界とする。
+ * 手帳の罫線はノイズとして除去される。
  */
 export async function detectParagraphs(
   source: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
@@ -130,14 +128,9 @@ export async function detectParagraphs(
     height: imgData.height,
   };
 
-  const minLineLength = options?.minLineLengthRatio
-    ? workerImageData.width * options.minLineLengthRatio
-    : undefined;
-
   const result = await workerDetectParagraphs(workerImageData, {
-    minLineLength,
-    maxAngleDeg: options?.maxAngleDeg,
-    whitespaceThreshold: options?.whitespaceThreshold,
+    minGapRatio: options?.minGapRatio,
+    densityThreshold: options?.densityThreshold,
   });
 
   return result.splitYs;
