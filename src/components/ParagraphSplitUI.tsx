@@ -101,14 +101,14 @@ function SplitLineHandle({
 }: SplitLineHandleProps) {
   return (
     <div
-      className="absolute left-0 right-0 z-20 -translate-y-1/2 group"
+      className="absolute left-0 right-0 z-20 -translate-y-1/2 group pointer-events-none"
       style={{ top: `${yPct * 100}%` }}
     >
       <div
-        className="absolute inset-x-0 top-1/2 h-[2px] bg-red-500/70 pointer-events-none"
+        className="absolute inset-x-0 top-1/2 h-[2px] bg-red-500/70"
       />
       <div
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing touch-none"
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing touch-none pointer-events-auto"
         style={{ width: size, height: size }}
         onPointerDown={onPointerDown}
         role="slider"
@@ -123,7 +123,7 @@ function SplitLineHandle({
       <button
         type="button"
         onClick={onDelete}
-        className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white border border-red-300 text-red-500 text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 transition-opacity"
+        className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white border border-red-300 text-red-500 text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 transition-opacity pointer-events-auto"
         aria-label="分割線を削除"
       >
         ✕
@@ -538,7 +538,7 @@ export function ParagraphSplitUI({
         {/* 分割線ハンドル */}
         {imageSize &&
           splitYs.map((y, i) => (
-            <div key={`handle-${i}`} className="absolute inset-x-0 pointer-events-auto" style={{ top: 0, bottom: 0 }}>
+            <div key={`handle-${i}`} className="absolute inset-x-0 pointer-events-none">
               <SplitLineHandle
                 yPct={y / imageSize.height}
                 size={20}

@@ -10,6 +10,7 @@ import type { ParagraphObject, SplitResult, CropRect } from "@/types/scan";
 import {
   initOpenCV,
   imageToCanvas,
+  getOpenCVWorker,
 } from "@/lib/image-processing";
 
 // ---------------------------------------------------------------------------
@@ -24,16 +25,6 @@ type WorkerImageData = {
 
 let taskIdCounter = 0;
 
-function getBasePath(): string {
-  return process.env.NEXT_PUBLIC_BASE_PATH || "";
-}
-
-function ensureWorker(): Worker {
-  // image-processing.ts と同一の Worker を共有する
-  const basePath = getBasePath();
-  return new Worker(`${basePath}/opencv-worker.js`);
-}
-
 type ParagraphBoundariesResult = {
   splitYs: number[];
 };
@@ -47,7 +38,7 @@ function workerDetectParagraphs(
   },
 ): Promise<ParagraphBoundariesResult> {
   return new Promise((resolve, reject) => {
-    const w = ensureWorker();
+    const w = getOpenCVWorker();
     const id = `para-${++taskIdCounter}`;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -90,7 +81,6 @@ function workerDetectParagraphs(
       width: imageData.width,
       height: imageData.height,
     };
-    w.postMessage({ type: "init" });
     w.postMessage({ type: "detectParagraphs", id, imageData: copy, options }, [copy.data.buffer]);
   });
 }
