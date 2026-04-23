@@ -140,7 +140,7 @@ export function ParagraphSplitUI({
   );
   const [autoDetectLoading, setAutoDetectLoading] = useState(false);
   const [autoDetectMessage, setAutoDetectMessage] = useState<{ type: "success" | "warn"; text: string } | null>(null);
-  const [correctedCanvasUrl, setCorrectedCanvasUrl] = useState<string | null>(null);
+  const [, setCorrectedCanvasUrl] = useState<string | null>(null);
   const [correctedImageUrl, setCorrectedImageUrl] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -196,6 +196,12 @@ export function ParagraphSplitUI({
         });
         const url = URL.createObjectURL(blob);
         
+        // ObjectURL 生成後にキャンセルチェック
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        
         // 新しい URL を設定する前に古い URL を解放
         setCorrectedCanvasUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev);
@@ -228,8 +234,7 @@ export function ParagraphSplitUI({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageUrl]);
+  }, [imageUrl, correction, existingSplit]);
 
   // ---- OpenCV.js の事前ロード ----
 

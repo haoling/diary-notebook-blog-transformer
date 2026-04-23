@@ -531,18 +531,36 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
     async (page: ScanPage) => {
       if (!accessToken) return;
       setOperationError(null);
+      
+      // リクエスト ID を生成して並行実行時の競合を回避
+      const requestId = Date.now();
+      handleSelectPageForSplit.currentRequestId = requestId;
+      
       try {
         const client = createDriveClient(accessToken);
         const blob = await client.getFileBlob(page.originalFileId);
+        
+        // 最新のリクエストでない場合は破棄
+        if (handleSelectPageForSplit.currentRequestId !== requestId) {
+          URL.revokeObjectURL(URL.createObjectURL(blob));
+          return;
+        }
+        
         const url = URL.createObjectURL(blob);
         setSplitImageUrl(url);
         setSplittingPageId(page.id);
       } catch (err) {
-        setOperationError(err instanceof Error ? err.message : "画像の読み込みに失敗しました。");
+        // 最新のリクエストでのエラーのみを表示
+        if (handleSelectPageForSplit.currentRequestId === requestId) {
+          setOperationError(err instanceof Error ? err.message : "画像の読み込みに失敗しました。");
+        }
       }
     },
     [accessToken],
   );
+  
+  // リクエスト ID を格納するプロパティを追加
+  handleSelectPageForSplit.currentRequestId = 0;
 
   const handleSaveSplit = useCallback(
     async (split: SplitResult) => {
