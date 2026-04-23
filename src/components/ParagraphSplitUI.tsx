@@ -5,7 +5,6 @@ import {
   useRef,
   useCallback,
   useEffect,
-  useMemo,
 } from "react";
 import {
   applyCorrections,
@@ -18,7 +17,7 @@ import {
   createSplitResult,
 } from "@/lib/paragraph-detection";
 import { ParagraphCard } from "@/components/ParagraphCard";
-import type { CorrectionResult, ParagraphObject, SplitResult, CropRect } from "@/types/scan";
+import type { CorrectionResult, ParagraphObject, SplitResult } from "@/types/scan";
 
 // ---------------------------------------------------------------------------
 // 型定義
@@ -41,21 +40,6 @@ export type ParagraphSplitUIProps = {
 // ヘルパー関数
 // ---------------------------------------------------------------------------
 
-/** 画像の自然サイズを読み込む。 */
-function loadImageNaturalSize(url: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.addEventListener("load", () => {
-      resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    });
-    img.addEventListener("error", () => {
-      reject(new Error("画像の読み込みに失敗しました。"));
-    });
-    img.src = url;
-  });
-}
-
 /** 指定したURLからImage要素を生成する。 */
 function loadImageElement(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -73,11 +57,6 @@ function paragraphsToSplitYs(paragraphs: ParagraphObject[], imageHeight: number)
     .filter((p) => p.cropRect.y > 0 && p.cropRect.y < imageHeight)
     .map((p) => p.cropRect.y)
     .sort((a, b) => a - b);
-}
-
-/** 一意のIDを生成する。 */
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
 // ---------------------------------------------------------------------------
@@ -107,19 +86,15 @@ function SplitLineHandle({
       <div
         className="absolute inset-x-0 top-1/2 h-[2px] bg-red-500/70"
       />
-      <div
+      <button
+        type="button"
         className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing touch-none pointer-events-auto"
         style={{ width: size, height: size }}
         onPointerDown={onPointerDown}
-        role="slider"
         aria-label="分割線をドラッグ"
-        aria-valuenow={Math.round(yPct * 100)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        tabIndex={0}
       >
         <div className="w-full h-full rounded-full bg-red-500 border-2 border-white shadow-lg hover:bg-red-600 transition-colors" />
-      </div>
+      </button>
       <button
         type="button"
         onClick={onDelete}
@@ -210,11 +185,22 @@ export function ParagraphSplitUI({
         setImageSize({ width: resultCanvas.width, height: resultCanvas.height });
 
         // 補正済み画像のURLを生成
-        const blob = await new Promise<Blob>((resolve) => {
-          resultCanvas.toBlob((b) => resolve(b!), "image/png");
+        const blob = await new Promise<Blob>((resolve, reject) => {
+          resultCanvas.toBlob((b) => {
+            if (b) {
+              resolve(b);
+            } else {
+              reject(new Error("補正済み画像の Blob 生成に失敗しました。"));
+            }
+          }, "image/png");
         });
         const url = URL.createObjectURL(blob);
-        setCorrectedCanvasUrl(url);
+        
+        // 新しい URL を設定する前に古い URL を解放
+        setCorrectedCanvasUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
         setCorrectedImageUrl(url);
 
         // 既存の分割結果がない場合、Y座標配列を初期化
@@ -244,14 +230,6 @@ export function ParagraphSplitUI({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrl]);
-
-  // correctedCanvasUrl のクリーンアップ
-  useEffect(() => {
-    return () => {
-      if (correctedCanvasUrl) URL.revokeObjectURL(correctedCanvasUrl);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // ---- OpenCV.js の事前ロード ----
 
@@ -362,11 +340,40 @@ export function ParagraphSplitUI({
 
     setSplitYs((prev) => {
       const next = [...prev];
-      next[draggingIndex] = clampedY;
+      
+      // 重複を回避するスナップ処理
+      const occupiedYs = new Set(prev.filter((_, index) => index !== draggingIndex));
+      
+      let resolvedY = clampedY;
+      if (occupiedYs.has(resolvedY)) {
+        let found = false;
+
+        for (let offset = 1; offset < imageSize.height; offset += 1) {
+          const up = clampedY - offset;
+          if (up >= 1 && up <= imageSize.height - 2 && !occupiedYs.has(up)) {
+            resolvedY = up;
+            found = true;
+            break;
+          }
+
+          const down = clampedY + offset;
+          if (down >= 1 && down <= imageSize.height - 2 && !occupiedYs.has(down)) {
+            resolvedY = down;
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          return prev;
+        }
+      }
+
+      next[draggingIndex] = resolvedY;
       const sorted = [...next].sort((a, b) => a - b);
 
       // ドラッグ中の要素のインデックスを更新
-      const newIndex = sorted.indexOf(clampedY);
+      const newIndex = sorted.findIndex((y) => y === resolvedY);
       setDraggingIndex(newIndex);
       setParagraphs(splitYsToParagraphs(sorted, imageSize.width, imageSize.height));
       return sorted;

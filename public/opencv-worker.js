@@ -416,17 +416,18 @@ function detectParagraphBoundaries(imageData, options = {}) {
     //    ウィンドウサイズを画像高さの5%にして罫線間の隙間を完全に消す
     const WINDOW_SIZE = Math.max(15, Math.round(srcHeight * 0.05));
     const smoothed = new Float32Array(srcHeight);
+    
+    // 累積和を使って O(height) で計算
+    const halfW = Math.floor(WINDOW_SIZE / 2);
+    const prefixSums = new Float64Array(srcHeight + 1);
     for (let y = 0; y < srcHeight; y++) {
-      let sum = 0;
-      let count = 0;
-      const halfW = Math.floor(WINDOW_SIZE / 2);
-      for (let dy = -halfW; dy <= halfW; dy++) {
-        const yy = y + dy;
-        if (yy >= 0 && yy < srcHeight) {
-          sum += projData[yy];
-          count++;
-        }
-      }
+      prefixSums[y + 1] = prefixSums[y] + projData[y];
+    }
+    for (let y = 0; y < srcHeight; y++) {
+      const start = Math.max(0, y - halfW);
+      const end = Math.min(srcHeight - 1, y + halfW);
+      const sum = prefixSums[end + 1] - prefixSums[start];
+      const count = end - start + 1;
       smoothed[y] = sum / count;
     }
 

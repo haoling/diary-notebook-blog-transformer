@@ -48,11 +48,17 @@ function workerDetectParagraphs(
         timeoutId = null;
       }
       w.removeEventListener("message", handler);
-      w.removeEventListener("error", errorHandler);
-      w.removeEventListener("messageerror", errorHandler);
+      w.removeEventListener("error", workerErrorHandler);
+      w.removeEventListener("messageerror", workerErrorHandler);
     };
 
     const handler = (e: MessageEvent) => {
+      // id なしのグローバルエラー（OpenCV 初期化失敗など）もタスクに伝播させる
+      if (e.data.type === "error" && !e.data.id) {
+        cleanup();
+        reject(new Error(e.data.error ?? "Worker error"));
+        return;
+      }
       if (e.data.id !== id) return;
       cleanup();
       if (e.data.type === "result") {
@@ -62,14 +68,21 @@ function workerDetectParagraphs(
       }
     };
 
-    const errorHandler = () => {
+    // Worker クラッシュ・応答不能時にリスナーが残らないよう reject して解放する
+    const workerErrorHandler = (e: ErrorEvent | MessageEvent) => {
       cleanup();
-      reject(new Error("Worker error during paragraph detection"));
+      const errorMessage =
+        e.type === "messageerror"
+          ? `Worker messageerror: could not deserialize message (type=${e.type})`
+          : e instanceof ErrorEvent && e.message
+            ? e.message
+            : "Worker error";
+      reject(new Error(errorMessage));
     };
 
     w.addEventListener("message", handler);
-    w.addEventListener("error", errorHandler);
-    w.addEventListener("messageerror", errorHandler);
+    w.addEventListener("error", workerErrorHandler);
+    w.addEventListener("messageerror", workerErrorHandler);
 
     timeoutId = setTimeout(() => {
       cleanup();
@@ -81,7 +94,13 @@ function workerDetectParagraphs(
       width: imageData.width,
       height: imageData.height,
     };
-    w.postMessage({ type: "detectParagraphs", id, imageData: copy, options }, [copy.data.buffer]);
+    
+    try {
+      w.postMessage({ type: "detectParagraphs", id, imageData: copy, options }, [copy.data.buffer]);
+    } catch (error) {
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
   });
 }
 
@@ -171,7 +190,7 @@ export async function autoDetectParagraphs(
   options?: DetectParagraphsOptions,
 ): Promise<ParagraphObject[]> {
   const canvas = source instanceof HTMLCanvasElement ? source : imageToCanvas(source);
-  const splitYs = await detectParagraphs(source, options);
+  const splitYs = await detectParagraphs(canvas, options);
   return splitYsToParagraphs(splitYs, canvas.width, canvas.height);
 }
 

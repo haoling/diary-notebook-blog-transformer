@@ -312,6 +312,7 @@ function SplitPageCard({ page, accessToken, onSelect }: SplitPageCardProps) {
 
     async function loadThumbnail() {
       setLoading(true);
+      setThumbnailUrl(null);
       try {
         const blob = await client.getFileBlob(page.originalFileId);
         if (cancelled) return;
