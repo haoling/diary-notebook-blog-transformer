@@ -411,6 +411,9 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
   // 分割用の状態
   const [splittingPageId, setSplittingPageId] = useState<string | null>(null);
   const [splitImageUrl, setSplitImageUrl] = useState<string | null>(null);
+  
+  // 分割ページ選択時の並行リクエストを管理するための ref
+  const selectPageRequestIdRef = useRef(0);
 
   const loadSession = useCallback(async () => {
     if (!sessionManager || !sessionId) return;
@@ -534,15 +537,14 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
       
       // リクエスト ID を生成して並行実行時の競合を回避
       const requestId = Date.now();
-      handleSelectPageForSplit.currentRequestId = requestId;
+      selectPageRequestIdRef.current = requestId;
       
       try {
         const client = createDriveClient(accessToken);
         const blob = await client.getFileBlob(page.originalFileId);
         
         // 最新のリクエストでない場合は破棄
-        if (handleSelectPageForSplit.currentRequestId !== requestId) {
-          URL.revokeObjectURL(URL.createObjectURL(blob));
+        if (selectPageRequestIdRef.current !== requestId) {
           return;
         }
         
@@ -551,16 +553,13 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
         setSplittingPageId(page.id);
       } catch (err) {
         // 最新のリクエストでのエラーのみを表示
-        if (handleSelectPageForSplit.currentRequestId === requestId) {
+        if (selectPageRequestIdRef.current === requestId) {
           setOperationError(err instanceof Error ? err.message : "画像の読み込みに失敗しました。");
         }
       }
     },
     [accessToken],
   );
-  
-  // リクエスト ID を格納するプロパティを追加
-  handleSelectPageForSplit.currentRequestId = 0;
 
   const handleSaveSplit = useCallback(
     async (split: SplitResult) => {
