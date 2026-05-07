@@ -158,8 +158,9 @@ export function splitYsToParagraphs(
   imageWidth: number,
   imageHeight: number,
 ): ParagraphObject[] {
-  // 0 と imageHeight を含めた境界点を生成
-  const boundaries = [0, ...splitYs.filter((y) => y > 0 && y < imageHeight), imageHeight];
+  // 昇順ソート・重複除去した上で 0/imageHeight を付与して境界を生成
+  const sorted = [...new Set(splitYs.filter((y) => y > 0 && y < imageHeight))].sort((a, b) => a - b);
+  const boundaries = [0, ...sorted, imageHeight];
 
   return boundaries.slice(0, -1).map((topY, i) => {
     const bottomY = boundaries[i + 1];

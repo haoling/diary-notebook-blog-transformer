@@ -97,7 +97,7 @@ function SplitLineHandle({
       <button
         type="button"
         onClick={onDelete}
-        className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white border border-red-300 text-red-500 text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-50 transition-opacity pointer-events-auto"
+        className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white border border-red-300 text-red-500 text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-red-50 transition-opacity pointer-events-auto"
         aria-label="分割線を削除"
       >
         ✕
