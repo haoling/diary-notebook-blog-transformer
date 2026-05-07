@@ -56,14 +56,17 @@ export default function SessionsPage() {
   }, [index]);
 
   useEffect(() => {
-    const hash = window.location.hash.slice(1);
-    setActiveSessionId(hash || null);
-
-    const onHashChange = () => {
+    const syncFromUrl = () => {
       setActiveSessionId(window.location.hash.slice(1) || null);
     };
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
+    syncFromUrl();
+    // hashchange: ハッシュ直接操作時、popstate: Next.js <Link> ナビゲーション時
+    window.addEventListener("hashchange", syncFromUrl);
+    window.addEventListener("popstate", syncFromUrl);
+    return () => {
+      window.removeEventListener("hashchange", syncFromUrl);
+      window.removeEventListener("popstate", syncFromUrl);
+    };
   }, []);
 
   const handleSelectSession = useCallback((id: string) => {
