@@ -336,8 +336,8 @@ export function ParagraphSplitUI({
     e.preventDefault();
     e.stopPropagation();
     setDraggingIndex(index);
-    containerRef.current?.setPointerCapture(e.pointerId);
-  }, [containerRef]);
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+  }, []);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (draggingIndex === null || !containerRef.current || !imageSize) return;
