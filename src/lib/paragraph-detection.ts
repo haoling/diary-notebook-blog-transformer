@@ -89,14 +89,11 @@ function workerDetectParagraphs(
       reject(new Error("段落境界検出がタイムアウトしました。"));
     }, 30_000);
 
-    const copy = {
-      data: new Uint8ClampedArray(imageData.data),
-      width: imageData.width,
-      height: imageData.height,
-    };
-    
     try {
-      w.postMessage({ type: "detectParagraphs", id, imageData: copy, options }, [copy.data.buffer]);
+      w.postMessage(
+        { type: "detectParagraphs", id, imageData, options },
+        [imageData.data.buffer],
+      );
     } catch (error) {
       cleanup();
       reject(error instanceof Error ? error : new Error(String(error)));

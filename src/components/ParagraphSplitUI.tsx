@@ -140,7 +140,6 @@ export function ParagraphSplitUI({
   );
   const [autoDetectLoading, setAutoDetectLoading] = useState(false);
   const [autoDetectMessage, setAutoDetectMessage] = useState<{ type: "success" | "warn"; text: string } | null>(null);
-  const [, setCorrectedCanvasUrl] = useState<string | null>(null);
   const [correctedImageUrl, setCorrectedImageUrl] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -195,18 +194,13 @@ export function ParagraphSplitUI({
           }, "image/png");
         });
         const url = URL.createObjectURL(blob);
-        
+
         // ObjectURL 生成後にキャンセルチェック
         if (cancelled) {
           URL.revokeObjectURL(url);
           return;
         }
-        
-        // 新しい URL を設定する前に古い URL を解放
-        setCorrectedCanvasUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return url;
-        });
+
         setCorrectedImageUrl(url);
 
         // 既存の分割結果がない場合、Y座標配列を初期化
@@ -235,6 +229,13 @@ export function ParagraphSplitUI({
       cancelled = true;
     };
   }, [imageUrl, correction, existingSplit]);
+
+  // correctedImageUrl の ObjectURL を cleanup で解放（unmount 時・URL 変更時の両方をカバー）
+  useEffect(() => {
+    return () => {
+      if (correctedImageUrl) URL.revokeObjectURL(correctedImageUrl);
+    };
+  }, [correctedImageUrl]);
 
   // ---- OpenCV.js の事前ロード ----
 
@@ -406,11 +407,10 @@ export function ParagraphSplitUI({
       if (idx <= 0) return prev;
       const next = [...prev];
       [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-      // order を更新
-      next.forEach((p, i) => { p.order = i; });
-      const ys = paragraphsToSplitYs(next, imageSize?.height ?? 0);
+      const updated = next.map((p, i) => ({ ...p, order: i }));
+      const ys = paragraphsToSplitYs(updated, imageSize?.height ?? 0);
       setSplitYs(ys);
-      return next;
+      return updated;
     });
   }, [imageSize]);
 
@@ -420,10 +420,10 @@ export function ParagraphSplitUI({
       if (idx < 0 || idx >= prev.length - 1) return prev;
       const next = [...prev];
       [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-      next.forEach((p, i) => { p.order = i; });
-      const ys = paragraphsToSplitYs(next, imageSize?.height ?? 0);
+      const updated = next.map((p, i) => ({ ...p, order: i }));
+      const ys = paragraphsToSplitYs(updated, imageSize?.height ?? 0);
       setSplitYs(ys);
-      return next;
+      return updated;
     });
   }, [imageSize]);
 
