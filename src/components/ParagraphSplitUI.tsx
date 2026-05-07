@@ -393,11 +393,17 @@ export function ParagraphSplitUI({
   // ---- 段落操作 ----
 
   const handleDeleteParagraph = useCallback((id: string) => {
+    if (!imageSize) return;
     setParagraphs((prev) => {
-      const next = prev.filter((p) => p.id !== id);
-      const ys = paragraphsToSplitYs(next, imageSize?.height ?? 0);
-      setSplitYs(ys);
-      return next;
+      const idx = prev.findIndex((p) => p.id === id);
+      if (idx < 0 || prev.length <= 1) return prev;
+
+      const currentSplitYs = paragraphsToSplitYs(prev, imageSize.height);
+      // 先頭以外は上側の分割線を削除して前段落とマージ、先頭は下側の分割線を削除
+      const splitIndexToRemove = idx > 0 ? idx - 1 : 0;
+      const nextSplitYs = currentSplitYs.filter((_, i) => i !== splitIndexToRemove);
+      setSplitYs(nextSplitYs);
+      return splitYsToParagraphs(nextSplitYs, imageSize.width, imageSize.height);
     });
   }, [imageSize]);
 

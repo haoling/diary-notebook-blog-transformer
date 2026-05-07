@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useInitializeApp } from "@/lib/use-initialize-app";
 import { createDriveClient } from "@/lib/drive-client";
@@ -54,7 +54,7 @@ function correctionBadge(session: ScanSession): string | null {
 
 function splitProgress(session: ScanSession): { done: number; total: number } {
   const total = session.pages.filter((p) => p.correction !== undefined).length;
-  const done = session.pages.filter((p) => p.split !== undefined).length;
+  const done = session.pages.filter((p) => p.correction !== undefined && p.split !== undefined).length;
   return { done, total };
 }
 

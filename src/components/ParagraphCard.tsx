@@ -45,6 +45,7 @@ function CropPreview({
   useEffect(() => {
     let cancelled = false;
     const renderId = ++renderIdRef.current;
+    setStatus("loading");
 
     const img = new Image();
     img.crossOrigin = "anonymous";
