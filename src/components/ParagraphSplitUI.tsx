@@ -395,12 +395,21 @@ export function ParagraphSplitUI({
   const handleDeleteParagraph = useCallback((id: string) => {
     if (!imageSize) return;
     setParagraphs((prev) => {
-      const idx = prev.findIndex((p) => p.id === id);
-      if (idx < 0 || prev.length <= 1) return prev;
+      const paragraph = prev.find((p) => p.id === id);
+      if (!paragraph || prev.length <= 1) return prev;
 
       const currentSplitYs = paragraphsToSplitYs(prev, imageSize.height);
-      // 先頭以外は上側の分割線を削除して前段落とマージ、先頭は下側の分割線を削除
-      const splitIndexToRemove = idx > 0 ? idx - 1 : 0;
+      // cropRect.y で split line を特定（idx ではなく Y 座標ベースで探索して
+      // handleMoveUp/handleMoveDown による並び替え後も正しい線を削除できるようにする）
+      let splitIndexToRemove: number;
+      if (paragraph.cropRect.y === 0) {
+        // 先頭段落：次段落との境界（最初の splitY）を削除して次段落とマージ
+        splitIndexToRemove = 0;
+      } else {
+        splitIndexToRemove = currentSplitYs.indexOf(paragraph.cropRect.y);
+        if (splitIndexToRemove === -1) return prev;
+      }
+
       const nextSplitYs = currentSplitYs.filter((_, i) => i !== splitIndexToRemove);
       setSplitYs(nextSplitYs);
       return splitYsToParagraphs(nextSplitYs, imageSize.width, imageSize.height);
@@ -408,17 +417,15 @@ export function ParagraphSplitUI({
   }, [imageSize]);
 
   const handleMoveUp = useCallback((id: string) => {
+    // display order は paragraphs 配列で管理し、splitYs（空間的な分割位置）は変更しない
     setParagraphs((prev) => {
       const idx = prev.findIndex((p) => p.id === id);
       if (idx <= 0) return prev;
       const next = [...prev];
       [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-      const updated = next.map((p, i) => ({ ...p, order: i }));
-      const ys = paragraphsToSplitYs(updated, imageSize?.height ?? 0);
-      setSplitYs(ys);
-      return updated;
+      return next.map((p, i) => ({ ...p, order: i }));
     });
-  }, [imageSize]);
+  }, []);
 
   const handleMoveDown = useCallback((id: string) => {
     setParagraphs((prev) => {
@@ -426,12 +433,9 @@ export function ParagraphSplitUI({
       if (idx < 0 || idx >= prev.length - 1) return prev;
       const next = [...prev];
       [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-      const updated = next.map((p, i) => ({ ...p, order: i }));
-      const ys = paragraphsToSplitYs(updated, imageSize?.height ?? 0);
-      setSplitYs(ys);
-      return updated;
+      return next.map((p, i) => ({ ...p, order: i }));
     });
-  }, [imageSize]);
+  }, []);
 
   // ---- 全消去 ----
 

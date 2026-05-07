@@ -535,9 +535,9 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
       if (!accessToken) return;
       setOperationError(null);
       
-      // リクエスト ID を生成して並行実行時の競合を回避
-      const requestId = Date.now();
-      selectPageRequestIdRef.current = requestId;
+      // リクエスト ID を生成して並行実行時の競合を回避（単調増加で衝突なし）
+      selectPageRequestIdRef.current += 1;
+      const requestId = selectPageRequestIdRef.current;
       
       try {
         const client = createDriveClient(accessToken);
