@@ -476,8 +476,9 @@ function detectParagraphBoundaries(imageData, options = {}) {
       }
     }
 
-    // 9. 余白のY座標を境界として採用
+    // 9. 余白のY座標を境界として採用（先頭/末尾に接する余白は除外）
     const splitYs = whitespaceRegions
+      .filter(function(r) { return r.start > 0 && r.end < srcHeight - 1; })
       .map(function(r) { return r.center; })
       .filter(function(y) { return y > 0 && y < srcHeight - 1; })
       .sort(function(a, b) { return a - b; });

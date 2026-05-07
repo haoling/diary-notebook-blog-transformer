@@ -414,6 +414,9 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
   
   // 分割ページ選択時の並行リクエストを管理するための ref
   const selectPageRequestIdRef = useRef(0);
+  // activeStep を ref で追跡（非同期コールバック内で最新値を参照するため）
+  const activeStepRef = useRef<StepId>(activeStep);
+  useEffect(() => { activeStepRef.current = activeStep; }, [activeStep]);
 
   const loadSession = useCallback(async () => {
     if (!sessionManager || !sessionId) return;
@@ -543,11 +546,11 @@ export function SessionDetailPanel({ sessionId, onBack }: SessionDetailPanelProp
         const client = createDriveClient(accessToken);
         const blob = await client.getFileBlob(page.originalFileId);
         
-        // 最新のリクエストでない場合は破棄
-        if (selectPageRequestIdRef.current !== requestId) {
+        // 最新のリクエストでない、または split ステップを離れた場合は破棄
+        if (selectPageRequestIdRef.current !== requestId || activeStepRef.current !== "split") {
           return;
         }
-        
+
         const url = URL.createObjectURL(blob);
         setSplitImageUrl(url);
         setSplittingPageId(page.id);
