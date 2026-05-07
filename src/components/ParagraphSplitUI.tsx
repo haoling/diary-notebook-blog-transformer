@@ -146,7 +146,8 @@ export function ParagraphSplitUI({
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
 
-  // ドラッグ状態
+  // ドラッグ状態（ref で即時更新し、state は再レンダー用）
+  const draggingIndexRef = useRef<number | null>(null);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
 
   // ---- 画像のロードと補正 ----
@@ -335,12 +336,14 @@ export function ParagraphSplitUI({
   const handlePointerDown = useCallback((index: number) => (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    draggingIndexRef.current = index;
     setDraggingIndex(index);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
   }, []);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (draggingIndex === null || !containerRef.current || !imageSize) return;
+    const currentIndex = draggingIndexRef.current;
+    if (currentIndex === null || !containerRef.current || !imageSize) return;
 
     const container = containerRef.current;
     const rect = container.getBoundingClientRect();
@@ -350,10 +353,10 @@ export function ParagraphSplitUI({
 
     setSplitYs((prev) => {
       const next = [...prev];
-      
+
       // 重複を回避するスナップ処理
-      const occupiedYs = new Set(prev.filter((_, index) => index !== draggingIndex));
-      
+      const occupiedYs = new Set(prev.filter((_, i) => i !== currentIndex));
+
       let resolvedY = clampedY;
       if (occupiedYs.has(resolvedY)) {
         let found = false;
@@ -379,18 +382,20 @@ export function ParagraphSplitUI({
         }
       }
 
-      next[draggingIndex] = resolvedY;
+      next[currentIndex] = resolvedY;
       const sorted = [...next].sort((a, b) => a - b);
 
-      // ドラッグ中の要素のインデックスを更新
+      // ドラッグ中の要素のインデックスを ref と state の両方で即時更新
       const newIndex = sorted.findIndex((y) => y === resolvedY);
+      draggingIndexRef.current = newIndex;
       setDraggingIndex(newIndex);
       setParagraphs(splitYsToParagraphs(sorted, imageSize.width, imageSize.height));
       return sorted;
     });
-  }, [draggingIndex, imageSize]);
+  }, [imageSize]);
 
   const handlePointerUp = useCallback(() => {
+    draggingIndexRef.current = null;
     setDraggingIndex(null);
   }, []);
 
