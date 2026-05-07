@@ -57,8 +57,16 @@ function CropPreview({
         if (!canvas) return;
 
         const { x, y, width, height } = cropRect;
-        const srcW = Math.max(1, Math.min(width, img.naturalWidth - x));
-        const srcH = Math.max(1, Math.min(height, img.naturalHeight - y));
+        const availW = img.naturalWidth - x;
+        const availH = img.naturalHeight - y;
+
+        if (availW <= 0 || availH <= 0) {
+          setStatus("error");
+          return;
+        }
+
+        const srcW = Math.min(width, availW);
+        const srcH = Math.min(height, availH);
 
         if (srcW < 1 || srcH < 1) {
           setStatus("error");

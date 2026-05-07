@@ -140,6 +140,8 @@ export function ParagraphSplitUI({
   );
   const [autoDetectLoading, setAutoDetectLoading] = useState(false);
   const [autoDetectMessage, setAutoDetectMessage] = useState<{ type: "success" | "warn"; text: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [correctedImageUrl, setCorrectedImageUrl] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -160,6 +162,7 @@ export function ParagraphSplitUI({
 
     async function loadAndCorrect() {
       setLoading(true);
+      setLoadError(null);
       try {
         const img = await loadImageElement(imageUrl);
         if (cancelled) return;
@@ -218,6 +221,7 @@ export function ParagraphSplitUI({
       } catch (err) {
         if (!cancelled) {
           console.error(err);
+          setLoadError(err instanceof Error ? err.message : "画像の読み込みまたは補正に失敗しました。");
           setLoading(false);
         }
       }
@@ -228,7 +232,7 @@ export function ParagraphSplitUI({
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, correction, existingSplit]);
+  }, [imageUrl, correction, existingSplit, retryKey]);
 
   // correctedImageUrl の ObjectURL を cleanup で解放（unmount 時・URL 変更時の両方をカバー）
   useEffect(() => {
@@ -471,6 +475,30 @@ export function ParagraphSplitUI({
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-slate-400">画像を読み込み中...</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-12">
+        <p className="text-sm text-red-600">{loadError}</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => { setLoadError(null); setRetryKey((k) => k + 1); }}
+            className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+          >
+            再試行
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-3 py-1.5 text-sm rounded bg-slate-200 text-slate-700 hover:bg-slate-300"
+          >
+            キャンセル
+          </button>
+        </div>
       </div>
     );
   }
