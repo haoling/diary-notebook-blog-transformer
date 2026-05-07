@@ -14,7 +14,7 @@ export type ParagraphCardProps = {
   imageUrl: string;
   /** 段落の表示順。 */
   index: number;
-  /** 段落の削除コールバック。 */
+  /** 隣接段落との結合コールバック（分割線を1本削除して前後段落とマージする）。 */
   onDelete: (id: string) => void;
   /** 段落の順序入れ替えコールバック。 */
   onMoveUp?: (id: string) => void;
@@ -181,8 +181,8 @@ export function ParagraphCard({
             type="button"
             onClick={() => onDelete(paragraph.id)}
             className="p-1 text-slate-400 hover:text-red-500"
-            aria-label="段落を削除"
-            title="段落を削除"
+            aria-label="隣接段落と結合"
+            title="隣接段落と結合（分割線を削除）"
           >
             ✕
           </button>

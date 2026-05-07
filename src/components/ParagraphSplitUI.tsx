@@ -69,7 +69,6 @@ type SplitLineHandleProps = {
   size: number;
   onPointerDown: (e: React.PointerEvent) => void;
   onDelete: () => void;
-  onDragStart?: () => void;
 };
 
 function SplitLineHandle({
@@ -211,10 +210,11 @@ export function ParagraphSplitUI({
           setSplitYs([]);
           setParagraphs([]);
         } else {
-          // 補正後の画像サイズで段落を再構築
+          // splitYs はオーバーレイ表示用に再計算するが、paragraphs は
+          // existingSplit のものをそのまま使って id/order を保持する
           const ys = paragraphsToSplitYs(existingSplit.paragraphs, resultCanvas.height);
           setSplitYs(ys);
-          setParagraphs(splitYsToParagraphs(ys, resultCanvas.width, resultCanvas.height));
+          setParagraphs(existingSplit.paragraphs);
         }
 
         setLoading(false);
