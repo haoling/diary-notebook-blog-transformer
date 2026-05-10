@@ -345,6 +345,158 @@ function detectDocumentCorners(imageData) {
 }
 
 // ---------------------------------------------------------------------------
+// 段落境界検出（Paragraph Split Detection）
+// ---------------------------------------------------------------------------
+
+/**
+ * OpenCV.js を使用してテキスト領域間の余白から段落境界を検出する。
+ *
+ * 手帳の罫線は段落区切りとして誤検出されるため、HoughLinesP は使用しない。
+ * 代わりに形態素演算（モルフォロジー）でテキスト領域を結合し、
+ * 垂直投射密度の大きな谷（テキストが存在しない領域）を段落境界とする。
+ *
+ * アルゴリズム:
+ * 1. グレースケール → 大きめのガウシアンブラー（罫線ノイズ除去）
+ * 2. 二値化（Otsu）
+ * 3. モルフォロジークロージング（水平方向に長いカーネルで文字を結合）
+ *    → テキスト行が横方向に繋がったブロックになる
+ * 4. 垂直投射（reduce SUM）で行ごとの白/黒面積比を計算
+ * 5. 大きな移動平均で平滑化（罫線間の微小隙間を消す）
+ * 6. 閾値以下の連続領域 → 余白候補
+ * 7. 余白の最小高さフィルタ（画像高さの3%以上のみ採用）
+ *
+ * @param {{ data: Uint8ClampedArray, width: number, height: number }} imageData
+ * @param {{ minGapRatio?: number, densityThreshold?: number }} options
+ * @returns {{ splitYs: number[] }}
+ */
+function detectParagraphBoundaries(imageData, options = {}) {
+  const {
+    minGapRatio = 0.03,
+    densityThreshold = 0.05,
+  } = options;
+
+  const { data, width: srcWidth, height: srcHeight } = imageData;
+  const srcMat = cv.matFromImageData({ data, width: srcWidth, height: srcHeight });
+
+  let grayMat = null;
+  let blurMat = null;
+  let binMat = null;
+  let closeKernel = null;
+  let closeMat = null;
+  let projection = null;
+
+  try {
+    // 1. グレースケール
+    grayMat = new cv.Mat();
+    cv.cvtColor(srcMat, grayMat, cv.COLOR_RGBA2GRAY);
+
+    // 2. 大きめのガウシアンブラー（罫線の細い線をぼかして消す）
+    blurMat = new cv.Mat();
+    const blurK = Math.min(15, Math.max(5, Math.round(Math.min(srcWidth, srcHeight) / 50)));
+    const blurKOdd = blurK % 2 === 0 ? blurK + 1 : blurK;
+    cv.GaussianBlur(grayMat, blurMat, new cv.Size(blurKOdd, blurKOdd), 0);
+
+    // 3. 二値化（Otsu で自動閾値）
+    binMat = new cv.Mat();
+    cv.threshold(blurMat, binMat, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+
+    // 4. モルフォロジークロージング（水平方向に文字を結合してテキストブロックにする）
+    closeMat = new cv.Mat();
+    const closeW = Math.max(15, Math.round(srcWidth * 0.02));
+    const closeH = Math.max(3, Math.round(srcHeight * 0.005));
+    closeKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(closeW, closeH));
+    cv.morphologyEx(binMat, closeMat, cv.MORPH_CLOSE, closeKernel);
+
+    // 5. 垂直投射（各行の黒ピクセル数を合計）
+    projection = new cv.Mat();
+    cv.reduce(closeMat, projection, 1, cv.REDUCE_SUM, cv.CV_32S);
+    const projData = projection.data32S;
+
+    // 6. 大きな移動平均で平滑化
+    //    ウィンドウサイズを画像高さの5%にして罫線間の隙間を完全に消す
+    const WINDOW_SIZE = Math.max(15, Math.round(srcHeight * 0.05));
+    const smoothed = new Float32Array(srcHeight);
+    
+    // 累積和を使って O(height) で計算
+    const halfW = Math.floor(WINDOW_SIZE / 2);
+    const prefixSums = new Float64Array(srcHeight + 1);
+    for (let y = 0; y < srcHeight; y++) {
+      prefixSums[y + 1] = prefixSums[y] + projData[y];
+    }
+    for (let y = 0; y < srcHeight; y++) {
+      const start = Math.max(0, y - halfW);
+      const end = Math.min(srcHeight - 1, y + halfW);
+      const sum = prefixSums[end + 1] - prefixSums[start];
+      const count = end - start + 1;
+      smoothed[y] = sum / count;
+    }
+
+    // 7. 最大投射値で正規化
+    let maxProj = 0;
+    for (let y = 0; y < srcHeight; y++) {
+      if (smoothed[y] > maxProj) maxProj = smoothed[y];
+    }
+    const normalized = maxProj > 0
+      ? smoothed.map(function(v) { return v / maxProj; })
+      : new Float32Array(srcHeight);
+
+    // 8. 連続する余白（低密度）領域の中心を検出
+    //    最小ギャップ高さ = 画像高さの minGapRatio（デフォルト3%）以上
+    const minGapHeight = Math.max(5, Math.round(srcHeight * minGapRatio));
+    const whitespaceRegions = [];
+    var wsStart = -1;
+    for (let y = 0; y < srcHeight; y++) {
+      if (normalized[y] < densityThreshold) {
+        if (wsStart < 0) wsStart = y;
+      } else {
+        if (wsStart >= 0) {
+          const gapHeight = y - wsStart;
+          if (gapHeight >= minGapHeight) {
+            whitespaceRegions.push({
+              start: wsStart,
+              end: y - 1,
+              center: Math.round((wsStart + y - 1) / 2),
+              height: gapHeight,
+            });
+          }
+          wsStart = -1;
+        }
+      }
+    }
+    // 画像末尾の余白
+    if (wsStart >= 0) {
+      const gapHeight = srcHeight - wsStart;
+      if (gapHeight >= minGapHeight) {
+        whitespaceRegions.push({
+          start: wsStart,
+          end: srcHeight - 1,
+          center: Math.round((wsStart + srcHeight - 1) / 2),
+          height: gapHeight,
+        });
+      }
+    }
+
+    // 9. 余白のY座標を境界として採用（先頭/末尾に接する余白は除外）
+    const splitYs = whitespaceRegions
+      .filter(function(r) { return r.start > 0 && r.end < srcHeight - 1; })
+      .map(function(r) { return r.center; })
+      .filter(function(y) { return y > 0 && y < srcHeight - 1; })
+      .sort(function(a, b) { return a - b; });
+
+    return { splitYs: splitYs };
+
+  } finally {
+    projection?.delete();
+    closeMat?.delete();
+    closeKernel?.delete();
+    binMat?.delete();
+    blurMat?.delete();
+    grayMat?.delete();
+    srcMat.delete();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // メッセージハンドラ
 // ---------------------------------------------------------------------------
 
@@ -367,6 +519,13 @@ self.onmessage = async (e) => {
         await initOpenCV();
         const perspectiveParams = detectDocumentCorners(e.data.imageData);
         self.postMessage({ type: "result", id, perspectiveParams });
+        break;
+      }
+      case "detectParagraphs": {
+        await initOpenCV();
+        const options = e.data.options || {};
+        const result = detectParagraphBoundaries(e.data.imageData, options);
+        self.postMessage({ type: "result", id, paragraphBoundaries: result });
         break;
       }
       default:

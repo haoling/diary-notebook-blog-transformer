@@ -56,6 +56,11 @@ function ensureWorker(): Worker {
   return worker;
 }
 
+/** image-processing.ts で管理する OpenCV Worker インスタンスを取得する。 */
+export function getOpenCVWorker(): Worker {
+  return ensureWorker();
+}
+
 function updateStatus(status: WorkerStatus) {
   workerStatus = status;
   statusListeners.forEach((listener) => listener(status));
