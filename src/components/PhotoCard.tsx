@@ -1,15 +1,14 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import type { PhotoObject } from "@/types/photo";
-import type { CropRect } from "@/types/scan";
+import type { PhotoObject, NormalizedCropRect } from "@/types/photo";
 
 export type PhotoCardProps = {
   photo: PhotoObject;
   /** サムネイル画像の URL。Drive の場合は認証付き fetch が必要なため外部から渡す。 */
   thumbnailUrl?: string;
   onDelete?: (id: string) => void;
-  onCropChange?: (id: string, cropRect: CropRect) => void;
+  onCropChange?: (id: string, cropRect: NormalizedCropRect) => void;
 };
 
 type CropState = {
@@ -31,7 +30,7 @@ const INITIAL_CROP: CropState = {
 export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: PhotoCardProps) {
   const [showCropUI, setShowCropUI] = useState(false);
   const [cropState, setCropState] = useState<CropState>(INITIAL_CROP);
-  const [pendingCrop, setPendingCrop] = useState<CropRect | null>(
+  const [pendingCrop, setPendingCrop] = useState<NormalizedCropRect | null>(
     photo.cropRect ?? null,
   );
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -90,7 +89,7 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
       const y1 = Math.min(cropState.startY, y);
       const x2 = Math.max(cropState.startX, x);
       const y2 = Math.max(cropState.startY, y);
-      const crop: CropRect = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+      const crop: NormalizedCropRect = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
       setPendingCrop(crop);
       setCropState(INITIAL_CROP);
     },

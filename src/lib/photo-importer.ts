@@ -1,4 +1,5 @@
 import { DriveClient } from "./drive-client";
+import { DriveNotFoundError } from "./drive-errors";
 import { IndexManager } from "./index-manager";
 import type { PhotoObject } from "@/types/photo";
 import type { PhotoSourceType } from "@/types/settings";
@@ -112,7 +113,10 @@ export class PhotoImporter {
   ): Promise<GooglePhotosSearchResult> {
     const { startDate, endDate, keyword, pageSize = 50, pageToken } = options;
 
-    const filters: Record<string, unknown> = {};
+    const filters: Record<string, unknown> = {
+      // 動画を除外して写真のみ返す
+      mediaTypeFilter: { mediaTypes: ["PHOTO"] },
+    };
 
     if (startDate || endDate) {
       filters.dateFilter = {
@@ -127,7 +131,7 @@ export class PhotoImporter {
 
     const body: Record<string, unknown> = {
       pageSize,
-      filters: Object.keys(filters).length > 0 ? filters : undefined,
+      filters,
     };
     if (pageToken) body.pageToken = pageToken;
 
@@ -277,9 +281,13 @@ export class PhotoImporter {
   async deletePhoto(id: string): Promise<void> {
     await this.ensureIndexLoaded();
 
-    const file = await this.client
-      .findAppDataFileByName(photoFileName(id))
-      .catch(() => null);
+    let file = null;
+    try {
+      file = await this.client.findAppDataFileByName(photoFileName(id));
+    } catch (err) {
+      // ファイルが存在しない場合のみ null 扱い。その他のエラーは再スロー
+      if (!(err instanceof DriveNotFoundError)) throw err;
+    }
     if (file) {
       await this.client.deleteFile(file.id);
     }

@@ -35,6 +35,8 @@ function AuthedThumbnail({
 
   useEffect(() => {
     let cancelled = false;
+    // 新しい fetch を開始する前にプレースホルダに戻す
+    setBlobUrl(null);
     fetch(thumbnailLink, { headers: { Authorization: `Bearer ${accessToken}` } })
       .then((r) => (r.ok ? r.blob() : Promise.reject()))
       .then((blob) => {
@@ -280,47 +282,46 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
           )}
 
           {gpItems.length > 0 && (
-            <>
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                {gpItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="relative group rounded overflow-hidden border border-gray-200 bg-gray-50 aspect-square"
-                  >
-                    <img
-                      src={PhotoImporter.getThumbnailUrl(item.baseUrl, 200, 200)}
-                      alt={item.filename}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">
-                      <p className="text-white text-xs text-center px-1 truncate w-full text-center">
-                        {item.filename}
-                      </p>
-                      <button
-                        onClick={() => importGooglePhoto(item)}
-                        disabled={importing === item.id}
-                        className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition-colors disabled:opacity-50"
-                      >
-                        {importing === item.id ? "取り込み中…" : "インポート"}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {gpNextPageToken && (
-                <button
-                  onClick={() => searchGooglePhotos(true)}
-                  disabled={gpLoading}
-                  className="self-center px-4 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors disabled:opacity-50"
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {gpItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="relative group rounded overflow-hidden border border-gray-200 bg-gray-50 aspect-square"
                 >
-                  {gpLoading ? "読み込み中…" : "さらに読み込む"}
-                </button>
-              )}
-            </>
+                  <img
+                    src={PhotoImporter.getThumbnailUrl(item.baseUrl, 200, 200)}
+                    alt={item.filename}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">
+                    <p className="text-white text-xs text-center px-1 truncate w-full text-center">
+                      {item.filename}
+                    </p>
+                    <button
+                      onClick={() => importGooglePhoto(item)}
+                      disabled={importing === item.id}
+                      className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition-colors disabled:opacity-50"
+                    >
+                      {importing === item.id ? "取り込み中…" : "インポート"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
 
-          {!gpLoading && gpItems.length === 0 && (
+          {/* nextPageToken がある限りページングボタンを表示（キーワードフィルタでヒット0でも続きがある場合がある） */}
+          {gpNextPageToken && (
+            <button
+              onClick={() => searchGooglePhotos(true)}
+              disabled={gpLoading}
+              className="self-center px-4 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {gpLoading ? "読み込み中…" : "さらに読み込む"}
+            </button>
+          )}
+
+          {!gpLoading && gpItems.length === 0 && !gpNextPageToken && (
             <p className="text-gray-400 text-sm text-center py-6">
               日付範囲やキーワードを指定して検索してください。
             </p>
