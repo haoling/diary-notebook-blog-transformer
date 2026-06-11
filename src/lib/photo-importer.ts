@@ -9,6 +9,21 @@ function photoFileName(id: string): string {
   return `${PHOTO_FILE_PREFIX}${id}.json`;
 }
 
+/** Drive クエリ文字列値をエスケープする（`\` と `'`）。 */
+function escapeDriveQueryValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+/**
+ * ISO 8601 の日付文字列（YYYY-MM-DD または YYYY-MM-DDTHH:mm:ssZ）を
+ * タイムゾーン非依存で year/month/day オブジェクトに変換する。
+ */
+function parseIsoDateToYMD(iso: string): { year: number; month: number; day: number } {
+  const datePart = iso.split("T")[0];
+  const [year, month, day] = datePart.split("-").map(Number);
+  return { year, month, day };
+}
+
 /** Google Photos API のメディアアイテム（必要フィールドのみ）。 */
 export type GooglePhotosMediaItem = {
   id: string;
@@ -24,10 +39,12 @@ export type GooglePhotosMediaItem = {
 
 /** Google Photos 検索オプション。 */
 export type GooglePhotosSearchOptions = {
-  /** 絞り込む開始日（ISO 8601 形式）。 */
+  /** 絞り込む開始日（YYYY-MM-DD または ISO 8601 形式）。 */
   startDate?: string;
-  /** 絞り込む終了日（ISO 8601 形式）。 */
+  /** 絞り込む終了日（YYYY-MM-DD または ISO 8601 形式）。 */
   endDate?: string;
+  /** ファイル名部分一致フィルタ（クライアントサイドで適用）。 */
+  keyword?: string;
   /** 1ページあたりの件数（最大 100）。 */
   pageSize?: number;
   pageToken?: string;
@@ -58,11 +75,14 @@ const PHOTOS_API_BASE = "https://photoslibrary.googleapis.com/v1";
 /**
  * Google Photos / Google Drive から写真を検索し、
  * PhotoObject として appDataFolder に保存するクラス。
+ *
+ * IndexManager は初回操作時に自動で load() される。
  */
 export class PhotoImporter {
   private readonly client: DriveClient;
   private readonly indexManager: IndexManager;
   private readonly accessToken: string;
+  private indexLoaded = false;
 
   constructor(
     client: DriveClient,
@@ -74,6 +94,14 @@ export class PhotoImporter {
     this.accessToken = accessToken;
   }
 
+  /** IndexManager が未ロードなら load() を呼ぶ。 */
+  private async ensureIndexLoaded(): Promise<void> {
+    if (!this.indexLoaded) {
+      await this.indexManager.load();
+      this.indexLoaded = true;
+    }
+  }
+
   // ------------------------------------------------------------------
   // Google Photos 検索
   // ------------------------------------------------------------------
@@ -82,20 +110,16 @@ export class PhotoImporter {
   async searchGooglePhotos(
     options: GooglePhotosSearchOptions = {},
   ): Promise<GooglePhotosSearchResult> {
-    const { startDate, endDate, pageSize = 50, pageToken } = options;
+    const { startDate, endDate, keyword, pageSize = 50, pageToken } = options;
 
     const filters: Record<string, unknown> = {};
 
     if (startDate || endDate) {
-      const parseDate = (iso: string) => {
-        const d = new Date(iso);
-        return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
-      };
       filters.dateFilter = {
         ranges: [
           {
-            ...(startDate ? { startDate: parseDate(startDate) } : {}),
-            ...(endDate ? { endDate: parseDate(endDate) } : {}),
+            ...(startDate ? { startDate: parseIsoDateToYMD(startDate) } : {}),
+            ...(endDate ? { endDate: parseIsoDateToYMD(endDate) } : {}),
           },
         ],
       };
@@ -124,8 +148,18 @@ export class PhotoImporter {
     }
 
     const data = await res.json();
+    let mediaItems: GooglePhotosMediaItem[] = data.mediaItems ?? [];
+
+    // Google Photos API にファイル名検索がないため、クライアント側でフィルタする
+    if (keyword) {
+      const lower = keyword.toLowerCase();
+      mediaItems = mediaItems.filter((item) =>
+        item.filename.toLowerCase().includes(lower),
+      );
+    }
+
     return {
-      mediaItems: data.mediaItems ?? [],
+      mediaItems,
       nextPageToken: data.nextPageToken,
     };
   }
@@ -145,7 +179,7 @@ export class PhotoImporter {
     const mimeFilter =
       "(mimeType contains 'image/') and trashed = false";
     const keywordFilter = keyword
-      ? ` and name contains '${keyword.replace(/'/g, "\\'")}'`
+      ? ` and name contains '${escapeDriveQueryValue(keyword)}'`
       : "";
     const query = encodeURIComponent(mimeFilter + keywordFilter);
 
@@ -190,6 +224,8 @@ export class PhotoImporter {
   async importFromGooglePhotos(
     item: GooglePhotosMediaItem,
   ): Promise<PhotoObject> {
+    await this.ensureIndexLoaded();
+
     const id = crypto.randomUUID();
     const importedAt = new Date().toISOString();
 
@@ -210,6 +246,8 @@ export class PhotoImporter {
 
   /** Google Drive の画像ファイルを PhotoObject として保存する。 */
   async importFromGoogleDrive(file: DriveImageFile): Promise<PhotoObject> {
+    await this.ensureIndexLoaded();
+
     const id = crypto.randomUUID();
     const importedAt = new Date().toISOString();
 
@@ -237,6 +275,8 @@ export class PhotoImporter {
 
   /** PhotoObject を削除する（appDataFolder のファイルと index から）。 */
   async deletePhoto(id: string): Promise<void> {
+    await this.ensureIndexLoaded();
+
     const file = await this.client
       .findAppDataFileByName(photoFileName(id))
       .catch(() => null);
@@ -262,5 +302,18 @@ export class PhotoImporter {
     height = 256,
   ): string {
     return `${baseUrl}=w${width}-h${height}`;
+  }
+
+  /**
+   * Drive の thumbnailLink を Authorization ヘッダ付きで取得し Blob URL を返す。
+   * Drive サムネイルはサードパーティ Cookie 制限下で img src に直接使えないことがあるため。
+   */
+  async fetchDriveThumbnailBlobUrl(thumbnailLink: string): Promise<string> {
+    const res = await fetch(thumbnailLink, {
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+    });
+    if (!res.ok) throw new Error(`thumbnail fetch failed: ${res.status}`);
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
   }
 }

@@ -180,7 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     onError: clearAuth,
     scope:
-      "openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/photoslibrary.readonly",
+      "openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.metadata.readonly https://www.googleapis.com/auth/photoslibrary.readonly",
   });
 
   const logout = useCallback(() => {

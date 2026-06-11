@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   PhotoImporter,
   type GooglePhotosMediaItem,
@@ -18,6 +18,51 @@ type PhotoPickerProps = {
   onImported?: (photo: PhotoObject) => void;
 };
 
+/** Drive thumbnailLink を Bearer トークン付きで fetch して Blob URL を返すコンポーネント。 */
+function AuthedThumbnail({
+  thumbnailLink,
+  accessToken,
+  alt,
+  className,
+}: {
+  thumbnailLink: string;
+  accessToken: string;
+  alt: string;
+  className?: string;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const prevUrl = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(thumbnailLink, { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((r) => (r.ok ? r.blob() : Promise.reject()))
+      .then((blob) => {
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        prevUrl.current = url;
+        setBlobUrl(url);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (prevUrl.current) {
+        URL.revokeObjectURL(prevUrl.current);
+        prevUrl.current = null;
+      }
+    };
+  }, [thumbnailLink, accessToken]);
+
+  if (!blobUrl) {
+    return (
+      <div className={`bg-gray-100 flex items-center justify-center text-gray-400 text-xs ${className ?? ""}`}>
+        IMG
+      </div>
+    );
+  }
+  return <img src={blobUrl} alt={alt} className={className} />;
+}
+
 export function PhotoPicker({ onImported }: PhotoPickerProps) {
   const { accessToken } = useAuth();
   const [tab, setTab] = useState<Tab>("google_photos");
@@ -25,6 +70,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
   // --- Google Photos state ---
   const [gpStartDate, setGpStartDate] = useState("");
   const [gpEndDate, setGpEndDate] = useState("");
+  const [gpKeyword, setGpKeyword] = useState("");
   const [gpItems, setGpItems] = useState<GooglePhotosMediaItem[]>([]);
   const [gpNextPageToken, setGpNextPageToken] = useState<string | undefined>();
   const [gpLoading, setGpLoading] = useState(false);
@@ -62,6 +108,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
         const result = await importer.searchGooglePhotos({
           startDate: gpStartDate || undefined,
           endDate: gpEndDate || undefined,
+          keyword: gpKeyword || undefined,
           pageToken: append ? gpNextPageToken : undefined,
         });
         setGpItems((prev: GooglePhotosMediaItem[]) => (append ? [...prev, ...result.mediaItems] : result.mediaItems));
@@ -72,7 +119,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
         setGpLoading(false);
       }
     },
-    [makeImporter, gpStartDate, gpEndDate, gpNextPageToken],
+    [makeImporter, gpStartDate, gpEndDate, gpKeyword, gpNextPageToken],
   );
 
   // ------------------------------------------------------------------
@@ -108,16 +155,13 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
 
   const importGooglePhoto = useCallback(
     async (item: GooglePhotosMediaItem) => {
-      const importer = makeImporter();
-      if (!importer) return;
+      if (!accessToken) return;
       setImporting(item.id);
       try {
-        // IndexManager を load() してから使う
-        const client = createDriveClient(accessToken!);
+        const client = createDriveClient(accessToken);
         const indexManager = new IndexManager(client);
-        await indexManager.load();
-        const fullImporter = new PhotoImporter(client, indexManager, accessToken!);
-        const photo = await fullImporter.importFromGooglePhotos(item);
+        const importer = new PhotoImporter(client, indexManager, accessToken);
+        const photo = await importer.importFromGooglePhotos(item);
         onImported?.(photo);
       } catch (e) {
         alert(`インポートに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
@@ -125,20 +169,18 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
         setImporting(null);
       }
     },
-    [makeImporter, accessToken, onImported],
+    [accessToken, onImported],
   );
 
   const importDriveFile = useCallback(
     async (file: DriveImageFile) => {
-      const importer = makeImporter();
-      if (!importer) return;
+      if (!accessToken) return;
       setImporting(file.id);
       try {
-        const client = createDriveClient(accessToken!);
+        const client = createDriveClient(accessToken);
         const indexManager = new IndexManager(client);
-        await indexManager.load();
-        const fullImporter = new PhotoImporter(client, indexManager, accessToken!);
-        const photo = await fullImporter.importFromGoogleDrive(file);
+        const importer = new PhotoImporter(client, indexManager, accessToken);
+        const photo = await importer.importFromGoogleDrive(file);
         onImported?.(photo);
       } catch (e) {
         alert(`インポートに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
@@ -146,7 +188,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
         setImporting(null);
       }
     },
-    [makeImporter, accessToken, onImported],
+    [accessToken, onImported],
   );
 
   // Tab 切り替え時にリセット
@@ -213,6 +255,17 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
                 className="border border-gray-300 rounded px-2 py-1 text-sm"
               />
             </label>
+            <label className="flex flex-col gap-1 text-xs text-gray-600 flex-1 min-w-32">
+              キーワード（ファイル名）
+              <input
+                type="text"
+                value={gpKeyword}
+                onChange={(e) => setGpKeyword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && searchGooglePhotos(false)}
+                placeholder="部分一致"
+                className="border border-gray-300 rounded px-2 py-1 text-sm"
+              />
+            </label>
             <button
               onClick={() => searchGooglePhotos(false)}
               disabled={gpLoading}
@@ -269,7 +322,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
 
           {!gpLoading && gpItems.length === 0 && (
             <p className="text-gray-400 text-sm text-center py-6">
-              日付範囲を指定して検索してください。
+              日付範囲やキーワードを指定して検索してください。
             </p>
           )}
         </div>
@@ -278,6 +331,9 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
       {/* Google Drive パネル */}
       {tab === "google_drive" && (
         <div className="flex flex-col gap-3">
+          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            Drive 検索には <code>drive.metadata.readonly</code> スコープが必要です。ログイン時に同意していない場合は再ログインしてください。
+          </p>
           <div className="flex gap-2 items-end">
             <label className="flex flex-col gap-1 text-xs text-gray-600 flex-1">
               ファイル名で検索
@@ -312,8 +368,9 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
                     className="flex items-center gap-3 px-3 py-2 rounded border border-gray-200 hover:bg-gray-50"
                   >
                     {file.thumbnailLink ? (
-                      <img
-                        src={file.thumbnailLink}
+                      <AuthedThumbnail
+                        thumbnailLink={file.thumbnailLink}
+                        accessToken={accessToken}
                         alt={file.name}
                         className="w-10 h-10 object-cover rounded flex-shrink-0"
                       />
