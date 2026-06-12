@@ -31,6 +31,12 @@ function parseIsoDateToYMD(iso: string): { year: number; month: number; day: num
       month < 1 || month > 12 || day < 1 || day > 31) {
     throw new Error(`Invalid date value: "${iso}".`);
   }
+  // Date.UTC で実在日付かどうかを検証（例: 2026-02-31 は 3 月に繰り越される）
+  const utc = Date.UTC(year, month - 1, day);
+  const d = new Date(utc);
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() + 1 !== month || d.getUTCDate() !== day) {
+    throw new Error(`Date does not exist: "${iso}".`);
+  }
   return { year, month, day };
 }
 
@@ -210,9 +216,14 @@ export class PhotoImporter {
       "nextPageToken,files(id,name,mimeType,thumbnailLink,createdTime,modifiedTime)",
     );
 
+    // Drive API の pageSize は 1..1000 の範囲に制限
+    const clampedPageSize = Number.isFinite(pageSize)
+      ? Math.min(1000, Math.max(1, pageSize))
+      : 50;
+
     const url =
       `https://www.googleapis.com/drive/v3/files?q=${query}&spaces=drive` +
-      `&fields=${fields}&pageSize=${pageSize}&orderBy=createdTime+desc${pageParam}`;
+      `&fields=${fields}&pageSize=${clampedPageSize}&orderBy=createdTime+desc${pageParam}`;
 
     const res = await fetch(url, {
       headers: {

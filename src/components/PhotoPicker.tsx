@@ -43,6 +43,8 @@ function AuthedThumbnail({
     })
       .then((r) => (r.ok ? r.blob() : Promise.reject()))
       .then((blob) => {
+        // cleanup 後（abort 済み）に then() が走った場合は state 更新をスキップ
+        if (controller.signal.aborted) return;
         const url = URL.createObjectURL(blob);
         prevUrl.current = url;
         setBlobUrl(url);

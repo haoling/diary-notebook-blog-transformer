@@ -150,6 +150,12 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
     [cropState, getImageNormalizedCoords],
   );
 
+  const onPointerCancel = useCallback(() => {
+    if (cropState.active) {
+      setCropState(INITIAL_CROP);
+    }
+  }, [cropState.active]);
+
   const openCropUI = () => {
     // 開き直すたびに最新の photo.cropRect を pendingCrop に同期
     setPendingCrop(photo.cropRect ?? null);
@@ -220,10 +226,11 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
     <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex flex-col">
       {/* サムネイル */}
       <div
-        className={`relative bg-gray-100 aspect-square overflow-hidden ${showCropUI ? "cursor-crosshair select-none" : ""}`}
+        className={`relative bg-gray-100 aspect-square overflow-hidden ${showCropUI ? "cursor-crosshair select-none touch-none" : ""}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
       >
         {thumbnailUrl ? (
           <img
