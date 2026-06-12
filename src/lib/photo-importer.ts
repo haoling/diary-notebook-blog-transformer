@@ -24,18 +24,18 @@ function parseIsoDateToYMD(iso: string): { year: number; month: number; day: num
   const datePart = iso.split("T")[0];
   const parts = datePart.split("-");
   if (parts.length !== 3) {
-    throw new Error(`Invalid date format: "${iso}". Expected YYYY-MM-DD.`);
+    throw new Error(`日付の形式が正しくありません: "${iso}"（YYYY-MM-DD 形式で入力してください）。`);
   }
   const [year, month, day] = parts.map(Number);
   if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day) ||
       month < 1 || month > 12 || day < 1 || day > 31) {
-    throw new Error(`Invalid date value: "${iso}".`);
+    throw new Error(`日付の値が不正です: "${iso}"（月は 1〜12、日は 1〜31 の範囲で指定してください）。`);
   }
   // Date.UTC で実在日付かどうかを検証（例: 2026-02-31 は 3 月に繰り越される）
   const utc = Date.UTC(year, month - 1, day);
   const d = new Date(utc);
   if (d.getUTCFullYear() !== year || d.getUTCMonth() + 1 !== month || d.getUTCDate() !== day) {
-    throw new Error(`Date does not exist: "${iso}".`);
+    throw new Error(`存在しない日付です: "${iso}"（${month} 月に ${day} 日はありません）。`);
   }
   return { year, month, day };
 }
@@ -99,6 +99,7 @@ export class PhotoImporter {
   private readonly indexManager: IndexManager;
   private readonly accessToken: string;
   private indexLoaded = false;
+  private indexLoadPromise: Promise<void> | null = null;
 
   constructor(
     client: DriveClient,
@@ -110,12 +111,15 @@ export class PhotoImporter {
     this.accessToken = accessToken;
   }
 
-  /** IndexManager が未ロードなら load() を呼ぶ。 */
-  private async ensureIndexLoaded(): Promise<void> {
-    if (!this.indexLoaded) {
-      await this.indexManager.load();
-      this.indexLoaded = true;
+  /** IndexManager が未ロードなら load() を呼ぶ。並行呼び出しでも load() は1回だけ実行される。 */
+  private ensureIndexLoaded(): Promise<void> {
+    if (this.indexLoaded) return Promise.resolve();
+    if (!this.indexLoadPromise) {
+      this.indexLoadPromise = this.indexManager.load().then(() => {
+        this.indexLoaded = true;
+      });
     }
+    return this.indexLoadPromise;
   }
 
   // ------------------------------------------------------------------
