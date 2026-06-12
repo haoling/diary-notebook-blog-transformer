@@ -80,6 +80,11 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
     }
     return importerRef.current.importer;
   }, [accessToken]);
+
+  // タブ切り替えや新規検索で古いレスポンスを無視するための世代カウンタ
+  const gpSearchGenRef = useRef(0);
+  const drSearchGenRef = useRef(0);
+
   const [gpStartDate, setGpStartDate] = useState("");
   const [gpEndDate, setGpEndDate] = useState("");
   const [gpKeyword, setGpKeyword] = useState("");
@@ -108,6 +113,9 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
       const importer = getImporter();
       if (!importer) return;
 
+      // このリクエストの世代を記録し、resolve 時に最新かどうか確認する
+      const gen = ++gpSearchGenRef.current;
+
       setGpLoading(true);
       setGpError(null);
       try {
@@ -117,12 +125,14 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
           keyword: gpKeyword || undefined,
           pageToken: append ? gpNextPageToken : undefined,
         });
+        if (gen !== gpSearchGenRef.current) return; // タブ切り替え等で古い結果は破棄
         setGpItems((prev: GooglePhotosMediaItem[]) => (append ? [...prev, ...result.mediaItems] : result.mediaItems));
         setGpNextPageToken(result.nextPageToken);
       } catch (e) {
+        if (gen !== gpSearchGenRef.current) return;
         setGpError(e instanceof Error ? e.message : String(e));
       } finally {
-        setGpLoading(false);
+        if (gen === gpSearchGenRef.current) setGpLoading(false);
       }
     },
     [getImporter, gpStartDate, gpEndDate, gpKeyword, gpNextPageToken],
@@ -137,6 +147,8 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
       const importer = getImporter();
       if (!importer) return;
 
+      const gen = ++drSearchGenRef.current;
+
       setDrLoading(true);
       setDrError(null);
       try {
@@ -144,12 +156,14 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
           keyword: drKeyword || undefined,
           pageToken: append ? drNextPageToken : undefined,
         });
+        if (gen !== drSearchGenRef.current) return;
         setDrFiles((prev: DriveImageFile[]) => (append ? [...prev, ...result.files] : result.files));
         setDrNextPageToken(result.nextPageToken);
       } catch (e) {
+        if (gen !== drSearchGenRef.current) return;
         setDrError(e instanceof Error ? e.message : String(e));
       } finally {
-        setDrLoading(false);
+        if (gen === drSearchGenRef.current) setDrLoading(false);
       }
     },
     [getImporter, drKeyword, drNextPageToken],
@@ -193,8 +207,10 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
     [getImporter, onImported],
   );
 
-  // Tab 切り替え時にリセット
+  // Tab 切り替え時にリセット（世代カウンタを進めて in-flight リクエストの結果を破棄）
   useEffect(() => {
+    gpSearchGenRef.current++;
+    drSearchGenRef.current++;
     setGpItems([]);
     setGpNextPageToken(undefined);
     setGpError(null);

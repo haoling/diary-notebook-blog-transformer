@@ -138,7 +138,8 @@ export class PhotoImporter {
     }
 
     const body: Record<string, unknown> = {
-      pageSize,
+      // Google Photos API の pageSize は 1..100 の範囲に制限
+      pageSize: Math.min(100, Math.max(1, pageSize)),
       filters,
     };
     if (pageToken) body.pageToken = pageToken;
@@ -250,8 +251,14 @@ export class PhotoImporter {
       takenAt: item.mediaMetadata.creationTime,
     };
 
-    await this.client.createAppDataFile(photoFileName(id), photo);
-    await this.indexManager.addPhoto({ id, importedAt, sourceType: "google_photos" });
+    const created = await this.client.createAppDataFile(photoFileName(id), photo);
+    try {
+      await this.indexManager.addPhoto({ id, importedAt, sourceType: "google_photos" });
+    } catch (err) {
+      // index 登録に失敗した場合、作成済みファイルをロールバック削除する
+      await this.client.deleteFile(created.id).catch(() => {});
+      throw err;
+    }
 
     return photo;
   }
@@ -272,8 +279,13 @@ export class PhotoImporter {
       takenAt: file.createdTime,
     };
 
-    await this.client.createAppDataFile(photoFileName(id), photo);
-    await this.indexManager.addPhoto({ id, importedAt, sourceType: "google_drive" });
+    const created = await this.client.createAppDataFile(photoFileName(id), photo);
+    try {
+      await this.indexManager.addPhoto({ id, importedAt, sourceType: "google_drive" });
+    } catch (err) {
+      await this.client.deleteFile(created.id).catch(() => {});
+      throw err;
+    }
 
     return photo;
   }
