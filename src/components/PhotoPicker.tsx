@@ -69,7 +69,17 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
   const { accessToken } = useAuth();
   const [tab, setTab] = useState<Tab>("google_photos");
 
-  // --- Google Photos state ---
+  // accessToken 単位で PhotoImporter インスタンスを再利用（index.json の load() を重複して呼ばない）
+  const importerRef = useRef<{ token: string; importer: PhotoImporter } | null>(null);
+  const getImporter = useCallback((): PhotoImporter | null => {
+    if (!accessToken) return null;
+    if (importerRef.current?.token !== accessToken) {
+      const client = createDriveClient(accessToken);
+      const indexManager = new IndexManager(client);
+      importerRef.current = { token: accessToken, importer: new PhotoImporter(client, indexManager, accessToken) };
+    }
+    return importerRef.current.importer;
+  }, [accessToken]);
   const [gpStartDate, setGpStartDate] = useState("");
   const [gpEndDate, setGpEndDate] = useState("");
   const [gpKeyword, setGpKeyword] = useState("");
@@ -88,12 +98,6 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
   // --- importing state ---
   const [importing, setImporting] = useState<string | null>(null);
 
-  const makeImporter = useCallback((): PhotoImporter | null => {
-    if (!accessToken) return null;
-    const client = createDriveClient(accessToken);
-    const indexManager = new IndexManager(client);
-    return new PhotoImporter(client, indexManager, accessToken);
-  }, [accessToken]);
 
   // ------------------------------------------------------------------
   // Google Photos 検索
@@ -101,7 +105,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
 
   const searchGooglePhotos = useCallback(
     async (append = false) => {
-      const importer = makeImporter();
+      const importer = getImporter();
       if (!importer) return;
 
       setGpLoading(true);
@@ -121,7 +125,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
         setGpLoading(false);
       }
     },
-    [makeImporter, gpStartDate, gpEndDate, gpKeyword, gpNextPageToken],
+    [getImporter, gpStartDate, gpEndDate, gpKeyword, gpNextPageToken],
   );
 
   // ------------------------------------------------------------------
@@ -130,7 +134,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
 
   const searchDriveImages = useCallback(
     async (append = false) => {
-      const importer = makeImporter();
+      const importer = getImporter();
       if (!importer) return;
 
       setDrLoading(true);
@@ -148,7 +152,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
         setDrLoading(false);
       }
     },
-    [makeImporter, drKeyword, drNextPageToken],
+    [getImporter, drKeyword, drNextPageToken],
   );
 
   // ------------------------------------------------------------------
@@ -157,12 +161,10 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
 
   const importGooglePhoto = useCallback(
     async (item: GooglePhotosMediaItem) => {
-      if (!accessToken) return;
+      const importer = getImporter();
+      if (!importer) return;
       setImporting(item.id);
       try {
-        const client = createDriveClient(accessToken);
-        const indexManager = new IndexManager(client);
-        const importer = new PhotoImporter(client, indexManager, accessToken);
         const photo = await importer.importFromGooglePhotos(item);
         onImported?.(photo);
       } catch (e) {
@@ -171,17 +173,15 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
         setImporting(null);
       }
     },
-    [accessToken, onImported],
+    [getImporter, onImported],
   );
 
   const importDriveFile = useCallback(
     async (file: DriveImageFile) => {
-      if (!accessToken) return;
+      const importer = getImporter();
+      if (!importer) return;
       setImporting(file.id);
       try {
-        const client = createDriveClient(accessToken);
-        const indexManager = new IndexManager(client);
-        const importer = new PhotoImporter(client, indexManager, accessToken);
         const photo = await importer.importFromGoogleDrive(file);
         onImported?.(photo);
       } catch (e) {
@@ -190,15 +190,19 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
         setImporting(null);
       }
     },
-    [accessToken, onImported],
+    [getImporter, onImported],
   );
 
   // Tab 切り替え時にリセット
   useEffect(() => {
     setGpItems([]);
     setGpNextPageToken(undefined);
+    setGpError(null);
+    setGpLoading(false);
     setDrFiles([]);
     setDrNextPageToken(undefined);
+    setDrError(null);
+    setDrLoading(false);
   }, [tab]);
 
   if (!accessToken) {

@@ -19,6 +19,13 @@ type CropState = {
   currentY: number;
 };
 
+/** React.MouseEvent を使わずに必要なフィールドだけ定義した最小型。 */
+type MouseEventLike = {
+  clientX: number;
+  clientY: number;
+  currentTarget: Element;
+};
+
 const INITIAL_CROP: CropState = {
   active: false,
   startX: 0,
@@ -26,6 +33,8 @@ const INITIAL_CROP: CropState = {
   currentX: 0,
   currentY: 0,
 };
+
+const MIN_CROP_SIZE = 0.01;
 
 export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: PhotoCardProps) {
   const [showCropUI, setShowCropUI] = useState(false);
@@ -52,49 +61,101 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
   // crop UI helpers
   // ------------------------------------------------------------------
 
-  const getRelativeCoords = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>): { x: number; y: number } => {
-      const rect = e.currentTarget.getBoundingClientRect();
+  /**
+   * コンテナ上のマウス座標を実画像の正規化座標（0..1）に変換する。
+   * object-cover によるスケール/オフセットを考慮する。
+   * 画像が未ロード（naturalWidth=0）の場合はコンテナ相対座標にフォールバック。
+   */
+  const getImageNormalizedCoords = useCallback(
+    (e: MouseEventLike): { x: number; y: number } => {
+      const container = e.currentTarget as HTMLElement;
+      const rect = container.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const cw = rect.width;
+      const ch = rect.height;
+
+      const img = imgRef.current;
+      const nw = img?.naturalWidth ?? 0;
+      const nh = img?.naturalHeight ?? 0;
+
+      if (!img || nw === 0 || nh === 0) {
+        // 画像未ロード時はコンテナ相対座標
+        return {
+          x: Math.min(1, Math.max(0, cx / cw)),
+          y: Math.min(1, Math.max(0, cy / ch)),
+        };
+      }
+
+      // object-cover のスケール（コンテナを完全に埋める最小スケール）
+      const scale = Math.max(cw / nw, ch / nh);
+      const renderedW = nw * scale;
+      const renderedH = nh * scale;
+      const offsetX = (cw - renderedW) / 2;
+      const offsetY = (ch - renderedH) / 2;
+
+      // コンテナ座標 → 画像ピクセル座標 → 正規化
+      const ix = (cx - offsetX) / scale;
+      const iy = (cy - offsetY) / scale;
+
       return {
-        x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
-        y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+        x: Math.min(1, Math.max(0, ix / nw)),
+        y: Math.min(1, Math.max(0, iy / nh)),
       };
     },
     [],
   );
 
   const onMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+    (e: MouseEventLike) => {
       if (!showCropUI) return;
-      const { x, y } = getRelativeCoords(e);
+      const { x, y } = getImageNormalizedCoords(e);
       setCropState({ active: true, startX: x, startY: y, currentX: x, currentY: y });
     },
-    [showCropUI, getRelativeCoords],
+    [showCropUI, getImageNormalizedCoords],
   );
 
   const onMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+    (e: MouseEventLike) => {
       if (!cropState.active) return;
-      const { x, y } = getRelativeCoords(e);
+      const { x, y } = getImageNormalizedCoords(e);
       setCropState((s: CropState) => ({ ...s, currentX: x, currentY: y }));
     },
-    [cropState.active, getRelativeCoords],
+    [cropState.active, getImageNormalizedCoords],
   );
 
   const onMouseUp = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+    (e: MouseEventLike) => {
       if (!cropState.active) return;
-      const { x, y } = getRelativeCoords(e);
+      const { x, y } = getImageNormalizedCoords(e);
       const x1 = Math.min(cropState.startX, x);
       const y1 = Math.min(cropState.startY, y);
       const x2 = Math.max(cropState.startX, x);
       const y2 = Math.max(cropState.startY, y);
-      const crop: NormalizedCropRect = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
-      setPendingCrop(crop);
+      const w = x2 - x1;
+      const h = y2 - y1;
+      // クリックのみ（極小）の選択は無効
+      if (w < MIN_CROP_SIZE || h < MIN_CROP_SIZE) {
+        setPendingCrop(null);
+      } else {
+        setPendingCrop({ x: x1, y: y1, width: w, height: h });
+      }
       setCropState(INITIAL_CROP);
     },
-    [cropState, getRelativeCoords],
+    [cropState, getImageNormalizedCoords],
   );
+
+  const onMouseLeave = useCallback(() => {
+    if (cropState.active) {
+      setCropState(INITIAL_CROP);
+    }
+  }, [cropState.active]);
+
+  const openCropUI = () => {
+    // 開き直すたびに最新の photo.cropRect を pendingCrop に同期
+    setPendingCrop(photo.cropRect ?? null);
+    setShowCropUI(true);
+  };
 
   const applyCrop = () => {
     if (pendingCrop) {
@@ -109,8 +170,41 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
     setCropState(INITIAL_CROP);
   };
 
-  // Normalize crop rect for display (handle reversed drag directions)
-  const displayCrop = cropState.active
+  /**
+   * オーバーレイ表示用の crop rect。
+   * ドラッグ中は cropState から計算、確定後は pendingCrop を使う。
+   * 座標は object-cover のコンテナ相対（0..1）に逆変換して表示する。
+   */
+  const toContainerRect = useCallback(
+    (r: NormalizedCropRect) => {
+      const img = imgRef.current;
+      const nw = img?.naturalWidth ?? 0;
+      const nh = img?.naturalHeight ?? 0;
+      const containerEl = img?.parentElement;
+
+      if (!img || nw === 0 || nh === 0 || !containerEl) {
+        return r;
+      }
+
+      const cw = containerEl.getBoundingClientRect().width;
+      const ch = containerEl.getBoundingClientRect().height;
+      const scale = Math.max(cw / nw, ch / nh);
+      const renderedW = nw * scale;
+      const renderedH = nh * scale;
+      const offsetX = (cw - renderedW) / 2;
+      const offsetY = (ch - renderedH) / 2;
+
+      return {
+        x: (r.x * nw * scale + offsetX) / cw,
+        y: (r.y * nh * scale + offsetY) / ch,
+        width: (r.width * nw * scale) / cw,
+        height: (r.height * nh * scale) / ch,
+      };
+    },
+    [],
+  );
+
+  const rawDisplayCrop: NormalizedCropRect | null = cropState.active
     ? {
         x: Math.min(cropState.startX, cropState.currentX),
         y: Math.min(cropState.startY, cropState.currentY),
@@ -118,6 +212,11 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
         height: Math.abs(cropState.currentY - cropState.startY),
       }
     : pendingCrop;
+
+  // 表示用にコンテナ相対座標に変換（ドラッグ中は既にコンテナ相対なので変換不要）
+  const displayCrop = rawDisplayCrop && !cropState.active
+    ? toContainerRect(rawDisplayCrop)
+    : rawDisplayCrop;
 
   return (
     <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex flex-col">
@@ -127,6 +226,7 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
+        onMouseLeave={onMouseLeave}
       >
         {thumbnailUrl ? (
           <img
@@ -143,7 +243,7 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
         )}
 
         {/* クロップ選択オーバーレイ */}
-        {showCropUI && displayCrop && displayCrop.width > 0.01 && displayCrop.height > 0.01 && (
+        {showCropUI && displayCrop && displayCrop.width > MIN_CROP_SIZE && displayCrop.height > MIN_CROP_SIZE && (
           <div
             className="absolute border-2 border-blue-400 bg-blue-400/20 pointer-events-none"
             style={{
@@ -178,7 +278,7 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
       <div className="px-3 pb-3 flex gap-2">
         {onCropChange && !showCropUI && (
           <button
-            onClick={() => setShowCropUI(true)}
+            onClick={openCropUI}
             className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
           >
             切り抜き
