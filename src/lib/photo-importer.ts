@@ -129,9 +129,15 @@ export class PhotoImporter {
 
     if (startDate || endDate) {
       // Google Photos の dateFilter.ranges は startDate/endDate の両方が必須。
-      // 片方のみ指定の場合は同じ日付を補完する。
-      const start = parseIsoDateToYMD(startDate ?? endDate!);
-      const end = parseIsoDateToYMD(endDate ?? startDate!);
+      // 片方のみ指定の場合は同じ日付を補完する。start > end の場合は入れ替えて正規化。
+      let start = parseIsoDateToYMD(startDate ?? endDate!);
+      let end = parseIsoDateToYMD(endDate ?? startDate!);
+      // 年月日を比較して start <= end になるよう正規化
+      const startTs = start.year * 10000 + start.month * 100 + start.day;
+      const endTs = end.year * 10000 + end.month * 100 + end.day;
+      if (startTs > endTs) {
+        [start, end] = [end, start];
+      }
       filters.dateFilter = {
         ranges: [{ startDate: start, endDate: end }],
       };

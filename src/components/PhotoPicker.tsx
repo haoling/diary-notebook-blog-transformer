@@ -34,20 +34,25 @@ function AuthedThumbnail({
   const prevUrl = useRef<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     // 新しい fetch を開始する前にプレースホルダに戻す
     setBlobUrl(null);
-    fetch(thumbnailLink, { headers: { Authorization: `Bearer ${accessToken}` } })
+    fetch(thumbnailLink, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+    })
       .then((r) => (r.ok ? r.blob() : Promise.reject()))
       .then((blob) => {
-        if (cancelled) return;
         const url = URL.createObjectURL(blob);
         prevUrl.current = url;
         setBlobUrl(url);
       })
-      .catch(() => {});
+      .catch((err) => {
+        // AbortError は正常な中断なので無視
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      });
     return () => {
-      cancelled = true;
+      controller.abort();
       if (prevUrl.current) {
         URL.revokeObjectURL(prevUrl.current);
         prevUrl.current = null;

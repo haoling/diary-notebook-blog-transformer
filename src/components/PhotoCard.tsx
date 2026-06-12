@@ -106,16 +106,21 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
     [],
   );
 
-  const onMouseDown = useCallback(
-    (e: MouseEventLike) => {
+  // Pointer Events + setPointerCapture でコンテナ外へのドラッグも確実に捕捉する
+  const onPointerDown = useCallback(
+    (e: MouseEventLike & { pointerId?: number; currentTarget: Element }) => {
       if (!showCropUI) return;
+      // ポインタキャプチャでコンテナ外の move/up も受け取る
+      if (typeof (e.currentTarget as HTMLElement).setPointerCapture === "function" && e.pointerId != null) {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      }
       const { x, y } = getImageNormalizedCoords(e);
       setCropState({ active: true, startX: x, startY: y, currentX: x, currentY: y });
     },
     [showCropUI, getImageNormalizedCoords],
   );
 
-  const onMouseMove = useCallback(
+  const onPointerMove = useCallback(
     (e: MouseEventLike) => {
       if (!cropState.active) return;
       const { x, y } = getImageNormalizedCoords(e);
@@ -124,7 +129,7 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
     [cropState.active, getImageNormalizedCoords],
   );
 
-  const onMouseUp = useCallback(
+  const onPointerUp = useCallback(
     (e: MouseEventLike) => {
       if (!cropState.active) return;
       const { x, y } = getImageNormalizedCoords(e);
@@ -144,12 +149,6 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
     },
     [cropState, getImageNormalizedCoords],
   );
-
-  const onMouseLeave = useCallback(() => {
-    if (cropState.active) {
-      setCropState(INITIAL_CROP);
-    }
-  }, [cropState.active]);
 
   const openCropUI = () => {
     // 開き直すたびに最新の photo.cropRect を pendingCrop に同期
@@ -222,10 +221,9 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
       {/* サムネイル */}
       <div
         className={`relative bg-gray-100 aspect-square overflow-hidden ${showCropUI ? "cursor-crosshair select-none" : ""}`}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onMouseLeave={onMouseLeave}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
       >
         {thumbnailUrl ? (
           <img
