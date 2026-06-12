@@ -204,6 +204,8 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
     [],
   );
 
+  // cropState も pendingCrop も実画像正規化座標（0..1）なので、
+  // ドラッグ中・確定後を問わず常に toContainerRect() でコンテナ相対に変換して描画する
   const rawDisplayCrop: NormalizedCropRect | null = cropState.active
     ? {
         x: Math.min(cropState.startX, cropState.currentX),
@@ -213,10 +215,7 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
       }
     : pendingCrop;
 
-  // 表示用にコンテナ相対座標に変換（ドラッグ中は既にコンテナ相対なので変換不要）
-  const displayCrop = rawDisplayCrop && !cropState.active
-    ? toContainerRect(rawDisplayCrop)
-    : rawDisplayCrop;
+  const displayCrop = rawDisplayCrop ? toContainerRect(rawDisplayCrop) : null;
 
   return (
     <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex flex-col">

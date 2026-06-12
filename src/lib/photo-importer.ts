@@ -18,10 +18,19 @@ function escapeDriveQueryValue(value: string): string {
 /**
  * ISO 8601 の日付文字列（YYYY-MM-DD または YYYY-MM-DDTHH:mm:ssZ）を
  * タイムゾーン非依存で year/month/day オブジェクトに変換する。
+ * 形式が不正な場合はエラーをスローする。
  */
 function parseIsoDateToYMD(iso: string): { year: number; month: number; day: number } {
   const datePart = iso.split("T")[0];
-  const [year, month, day] = datePart.split("-").map(Number);
+  const parts = datePart.split("-");
+  if (parts.length !== 3) {
+    throw new Error(`Invalid date format: "${iso}". Expected YYYY-MM-DD.`);
+  }
+  const [year, month, day] = parts.map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day) ||
+      month < 1 || month > 12 || day < 1 || day > 31) {
+    throw new Error(`Invalid date value: "${iso}".`);
+  }
   return { year, month, day };
 }
 
