@@ -119,13 +119,12 @@ export class PhotoImporter {
     };
 
     if (startDate || endDate) {
+      // Google Photos の dateFilter.ranges は startDate/endDate の両方が必須。
+      // 片方のみ指定の場合は同じ日付を補完する。
+      const start = parseIsoDateToYMD(startDate ?? endDate!);
+      const end = parseIsoDateToYMD(endDate ?? startDate!);
       filters.dateFilter = {
-        ranges: [
-          {
-            ...(startDate ? { startDate: parseIsoDateToYMD(startDate) } : {}),
-            ...(endDate ? { endDate: parseIsoDateToYMD(endDate) } : {}),
-          },
-        ],
+        ranges: [{ startDate: start, endDate: end }],
       };
     }
 
@@ -313,15 +312,16 @@ export class PhotoImporter {
   }
 
   /**
-   * Drive の thumbnailLink を Authorization ヘッダ付きで取得し Blob URL を返す。
+   * Drive の thumbnailLink を Authorization ヘッダ付きで取得して Blob を返す。
    * Drive サムネイルはサードパーティ Cookie 制限下で img src に直接使えないことがあるため。
+   * Blob URL が必要な場合は呼び出し側で URL.createObjectURL() し、
+   * 不要になったら URL.revokeObjectURL() を呼んでください。
    */
-  async fetchDriveThumbnailBlobUrl(thumbnailLink: string): Promise<string> {
+  async fetchDriveThumbnailBlob(thumbnailLink: string): Promise<Blob> {
     const res = await fetch(thumbnailLink, {
       headers: { Authorization: `Bearer ${this.accessToken}` },
     });
     if (!res.ok) throw new Error(`thumbnail fetch failed: ${res.status}`);
-    const blob = await res.blob();
-    return URL.createObjectURL(blob);
+    return res.blob();
   }
 }
