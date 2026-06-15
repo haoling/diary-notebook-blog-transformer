@@ -15,61 +15,51 @@ function escapeDriveQueryValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-/**
- * ISO 8601 の日付文字列（YYYY-MM-DD または YYYY-MM-DDTHH:mm:ssZ）を
- * タイムゾーン非依存で year/month/day オブジェクトに変換する。
- * 形式が不正な場合はエラーをスローする。
- */
-function parseIsoDateToYMD(iso: string): { year: number; month: number; day: number } {
-  const datePart = iso.split("T")[0];
-  const parts = datePart.split("-");
-  if (parts.length !== 3) {
-    throw new Error(`日付の形式が正しくありません: "${iso}"（YYYY-MM-DD 形式で入力してください）。`);
-  }
-  const [year, month, day] = parts.map(Number);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day) ||
-      month < 1 || month > 12 || day < 1 || day > 31) {
-    throw new Error(`日付の値が不正です: "${iso}"（月は 1〜12、日は 1〜31 の範囲で指定してください）。`);
-  }
-  // Date.UTC で実在日付かどうかを検証（例: 2026-02-31 は 3 月に繰り越される）
-  const utc = Date.UTC(year, month - 1, day);
-  const d = new Date(utc);
-  if (d.getUTCFullYear() !== year || d.getUTCMonth() + 1 !== month || d.getUTCDate() !== day) {
-    throw new Error(`存在しない日付です: "${iso}"（${month} 月に ${day} 日はありません）。`);
-  }
-  return { year, month, day };
-}
+// ------------------------------------------------------------------
+// Google Photos Picker API 型定義
+// ------------------------------------------------------------------
 
-/** Google Photos API のメディアアイテム（必要フィールドのみ）。 */
-export type GooglePhotosMediaItem = {
+/** Picker API セッション。 */
+export type PickerSession = {
   id: string;
-  filename: string;
-  mediaMetadata: {
-    creationTime?: string;
-    width?: string;
-    height?: string;
-    photo?: Record<string, unknown>;
+  pickerUri: string;
+  pollingConfig: {
+    /** ポーリング間隔（例: "5s"）。 */
+    pollInterval: string;
+    /** タイムアウト（例: "300s"）。 */
+    timeoutIn: string;
   };
-  baseUrl: string;
+  /** ユーザーが写真の選択を完了したら true になる。 */
+  mediaItemsSet?: boolean;
+  expireTime?: string;
 };
 
-/** Google Photos 検索オプション。 */
-export type GooglePhotosSearchOptions = {
-  /** 絞り込む開始日（YYYY-MM-DD または ISO 8601 形式）。 */
-  startDate?: string;
-  /** 絞り込む終了日（YYYY-MM-DD または ISO 8601 形式）。 */
-  endDate?: string;
-  /** ファイル名部分一致フィルタ（クライアントサイドで適用）。 */
-  keyword?: string;
-  /** 1ページあたりの件数（最大 100）。 */
-  pageSize?: number;
-  pageToken?: string;
+/** Picker API メディアアイテム。 */
+export type PickerMediaItem = {
+  id: string;
+  createTime?: string;
+  type?: string;
+  mediaFile: {
+    baseUrl: string;
+    mimeType: string;
+    filename: string;
+    mediaFileMetadata?: {
+      width?: number;
+      height?: number;
+      photoMetadata?: Record<string, unknown>;
+      videoMetadata?: Record<string, unknown>;
+    };
+  };
 };
 
-export type GooglePhotosSearchResult = {
-  mediaItems: GooglePhotosMediaItem[];
+export type PickerMediaItemsResult = {
+  mediaItems: PickerMediaItem[];
   nextPageToken?: string;
 };
+
+// ------------------------------------------------------------------
+// Google Drive 画像検索型定義
+// ------------------------------------------------------------------
 
 /** Google Drive の画像ファイル検索結果。 */
 export type DriveImageFile = {
@@ -86,10 +76,10 @@ export type DriveImageSearchResult = {
   nextPageToken?: string;
 };
 
-const PHOTOS_API_BASE = "https://photoslibrary.googleapis.com/v1";
+const PICKER_API_BASE = "https://photospicker.googleapis.com/v1";
 
 /**
- * Google Photos / Google Drive から写真を検索し、
+ * Google Photos Picker API / Google Drive から写真を検索し、
  * PhotoObject として appDataFolder に保存するクラス。
  *
  * IndexManager は初回操作時に自動で load() される。
@@ -123,74 +113,66 @@ export class PhotoImporter {
   }
 
   // ------------------------------------------------------------------
-  // Google Photos 検索
+  // Google Photos Picker API
   // ------------------------------------------------------------------
 
-  /** Google Photos からメディアアイテムを検索する。 */
-  async searchGooglePhotos(
-    options: GooglePhotosSearchOptions = {},
-  ): Promise<GooglePhotosSearchResult> {
-    const { startDate, endDate, keyword, pageSize = 50, pageToken } = options;
-
-    const filters: Record<string, unknown> = {
-      // 動画を除外して写真のみ返す
-      mediaTypeFilter: { mediaTypes: ["PHOTO"] },
-    };
-
-    if (startDate || endDate) {
-      // Google Photos の dateFilter.ranges は startDate/endDate の両方が必須。
-      // 片方のみ指定の場合は同じ日付を補完する。start > end の場合は入れ替えて正規化。
-      let start = parseIsoDateToYMD(startDate ?? endDate!);
-      let end = parseIsoDateToYMD(endDate ?? startDate!);
-      // 年月日を比較して start <= end になるよう正規化
-      const startTs = start.year * 10000 + start.month * 100 + start.day;
-      const endTs = end.year * 10000 + end.month * 100 + end.day;
-      if (startTs > endTs) {
-        [start, end] = [end, start];
-      }
-      filters.dateFilter = {
-        ranges: [{ startDate: start, endDate: end }],
-      };
-    }
-
-    const body: Record<string, unknown> = {
-      // Google Photos API の pageSize は 1..100 の範囲に制限
-      pageSize: Math.min(100, Math.max(1, pageSize)),
-      filters,
-    };
-    if (pageToken) body.pageToken = pageToken;
-
-    const res = await fetch(`${PHOTOS_API_BASE}/mediaItems:search`, {
+  /** Picker セッションを作成する。 */
+  async createPickerSession(): Promise<PickerSession> {
+    const res = await fetch(`${PICKER_API_BASE}/sessions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({}),
     });
-
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(
-        `Google Photos API error ${res.status}: ${JSON.stringify(err)}`,
-      );
+      throw new Error(`Picker API error ${res.status}: ${JSON.stringify(err)}`);
     }
+    return res.json() as Promise<PickerSession>;
+  }
 
+  /** Picker セッションの状態を取得する（ポーリング用）。 */
+  async getPickerSession(sessionId: string): Promise<PickerSession> {
+    const res = await fetch(`${PICKER_API_BASE}/sessions/${encodeURIComponent(sessionId)}`, {
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`Picker API error ${res.status}: ${JSON.stringify(err)}`);
+    }
+    return res.json() as Promise<PickerSession>;
+  }
+
+  /** Picker セッションで選択されたメディアアイテムを取得する。 */
+  async listPickerMediaItems(
+    sessionId: string,
+    pageToken?: string,
+  ): Promise<PickerMediaItemsResult> {
+    const params = new URLSearchParams({ sessionId });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const res = await fetch(`${PICKER_API_BASE}/mediaItems?${params}`, {
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`Picker API error ${res.status}: ${JSON.stringify(err)}`);
+    }
     const data = await res.json();
-    let mediaItems: GooglePhotosMediaItem[] = data.mediaItems ?? [];
-
-    // Google Photos API にファイル名検索がないため、クライアント側でフィルタする
-    if (keyword) {
-      const lower = keyword.toLowerCase();
-      mediaItems = mediaItems.filter((item) =>
-        item.filename.toLowerCase().includes(lower),
-      );
-    }
-
     return {
-      mediaItems,
+      mediaItems: data.mediaItems ?? [],
       nextPageToken: data.nextPageToken,
     };
+  }
+
+  /** Picker セッションを削除する。 */
+  async deletePickerSession(sessionId: string): Promise<void> {
+    await fetch(`${PICKER_API_BASE}/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+    });
   }
 
   // ------------------------------------------------------------------
@@ -254,9 +236,9 @@ export class PhotoImporter {
   // 写真インポート
   // ------------------------------------------------------------------
 
-  /** Google Photos のメディアアイテムを PhotoObject として保存する。 */
+  /** Google Photos Picker のメディアアイテムを PhotoObject として保存する。 */
   async importFromGooglePhotos(
-    item: GooglePhotosMediaItem,
+    item: PickerMediaItem,
   ): Promise<PhotoObject> {
     await this.ensureIndexLoaded();
 
@@ -268,8 +250,8 @@ export class PhotoImporter {
       importedAt,
       sourceType: "google_photos" as PhotoSourceType,
       sourceRef: item.id,
-      title: item.filename,
-      takenAt: item.mediaMetadata.creationTime,
+      title: item.mediaFile.filename,
+      takenAt: item.createTime,
     };
 
     const created = await this.client.createAppDataFile(photoFileName(id), photo);
@@ -342,7 +324,7 @@ export class PhotoImporter {
   }
 
   /**
-   * Google Photos のベース URL からサムネイル URL を生成する。
+   * Google Photos Picker の baseUrl からサムネイル URL を生成する。
    * baseUrl に `=w<width>-h<height>` を付与するとリサイズされた画像が得られる。
    */
   static getThumbnailUrl(

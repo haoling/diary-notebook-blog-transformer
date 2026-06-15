@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   PhotoImporter,
-  type GooglePhotosMediaItem,
+  type PickerMediaItem,
   type DriveImageFile,
 } from "@/lib/photo-importer";
 import { createDriveClient } from "@/lib/drive-client";
@@ -35,7 +35,6 @@ function AuthedThumbnail({
 
   useEffect(() => {
     const controller = new AbortController();
-    // 新しい fetch を開始する前にプレースホルダに戻す
     setBlobUrl(null);
     fetch(thumbnailLink, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -43,14 +42,12 @@ function AuthedThumbnail({
     })
       .then((r) => (r.ok ? r.blob() : Promise.reject()))
       .then((blob) => {
-        // cleanup 後（abort 済み）に then() が走った場合は state 更新をスキップ
         if (controller.signal.aborted) return;
         const url = URL.createObjectURL(blob);
         prevUrl.current = url;
         setBlobUrl(url);
       })
       .catch((err) => {
-        // AbortError は正常な中断なので無視
         if (err instanceof DOMException && err.name === "AbortError") return;
       });
     return () => {
@@ -76,7 +73,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
   const { accessToken } = useAuth();
   const [tab, setTab] = useState<Tab>("google_photos");
 
-  // accessToken 単位で PhotoImporter インスタンスを再利用（index.json の load() を重複して呼ばない）
+  // accessToken 単位で PhotoImporter インスタンスを再利用
   const importerRef = useRef<{ token: string; importer: PhotoImporter } | null>(null);
   const getImporter = useCallback((): PhotoImporter | null => {
     if (!accessToken) return null;
@@ -88,19 +85,17 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
     return importerRef.current.importer;
   }, [accessToken]);
 
-  // タブ切り替えや新規検索で古いレスポンスを無視するための世代カウンタ
-  const gpSearchGenRef = useRef(0);
-  const drSearchGenRef = useRef(0);
-
-  const [gpStartDate, setGpStartDate] = useState("");
-  const [gpEndDate, setGpEndDate] = useState("");
-  const [gpKeyword, setGpKeyword] = useState("");
-  const [gpItems, setGpItems] = useState<GooglePhotosMediaItem[]>([]);
+  // --- Google Photos Picker state ---
+  const [gpSession, setGpSession] = useState<{ id: string; pollIntervalMs: number } | null>(null);
+  const [gpPolling, setGpPolling] = useState(false);
+  const [gpItems, setGpItems] = useState<PickerMediaItem[]>([]);
   const [gpNextPageToken, setGpNextPageToken] = useState<string | undefined>();
   const [gpLoading, setGpLoading] = useState(false);
   const [gpError, setGpError] = useState<string | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Google Drive state ---
+  const drSearchGenRef = useRef(0);
   const [drKeyword, setDrKeyword] = useState("");
   const [drFiles, setDrFiles] = useState<DriveImageFile[]>([]);
   const [drNextPageToken, setDrNextPageToken] = useState<string | undefined>();
@@ -110,40 +105,107 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
   // --- importing state ---
   const [importing, setImporting] = useState<string | null>(null);
 
-
   // ------------------------------------------------------------------
-  // Google Photos 検索
+  // Google Photos Picker フロー
   // ------------------------------------------------------------------
 
-  const searchGooglePhotos = useCallback(
-    async (append = false) => {
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setGpPolling(false);
+  }, []);
+
+  const cancelPickerSession = useCallback(async () => {
+    stopPolling();
+    if (gpSession) {
       const importer = getImporter();
-      if (!importer) return;
+      importer?.deletePickerSession(gpSession.id).catch(() => {});
+    }
+    setGpSession(null);
+    setGpItems([]);
+    setGpNextPageToken(undefined);
+    setGpError(null);
+  }, [gpSession, getImporter, stopPolling]);
 
-      // このリクエストの世代を記録し、resolve 時に最新かどうか確認する
-      const gen = ++gpSearchGenRef.current;
-
-      setGpLoading(true);
-      setGpError(null);
-      try {
-        const result = await importer.searchGooglePhotos({
-          startDate: gpStartDate || undefined,
-          endDate: gpEndDate || undefined,
-          keyword: gpKeyword || undefined,
-          pageToken: append ? gpNextPageToken : undefined,
-        });
-        if (gen !== gpSearchGenRef.current) return; // タブ切り替え等で古い結果は破棄
-        setGpItems((prev: GooglePhotosMediaItem[]) => (append ? [...prev, ...result.mediaItems] : result.mediaItems));
-        setGpNextPageToken(result.nextPageToken);
-      } catch (e) {
-        if (gen !== gpSearchGenRef.current) return;
-        setGpError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (gen === gpSearchGenRef.current) setGpLoading(false);
-      }
+  /** セッションをポーリングし、mediaItemsSet になったらアイテムを取得する。 */
+  const pollSession = useCallback(
+    (sessionId: string, intervalMs: number, importer: PhotoImporter) => {
+      const tick = async () => {
+        try {
+          const session = await importer.getPickerSession(sessionId);
+          if (session.mediaItemsSet) {
+            stopPolling();
+            setGpLoading(true);
+            try {
+              const result = await importer.listPickerMediaItems(sessionId);
+              setGpItems(result.mediaItems);
+              setGpNextPageToken(result.nextPageToken);
+            } catch (e) {
+              setGpError(e instanceof Error ? e.message : String(e));
+            } finally {
+              setGpLoading(false);
+            }
+          } else {
+            pollTimerRef.current = setTimeout(tick, intervalMs);
+          }
+        } catch (e) {
+          stopPolling();
+          setGpError(e instanceof Error ? e.message : String(e));
+        }
+      };
+      pollTimerRef.current = setTimeout(tick, intervalMs);
     },
-    [getImporter, gpStartDate, gpEndDate, gpKeyword, gpNextPageToken],
+    [stopPolling],
   );
+
+  const openGooglePhotosPicker = useCallback(async () => {
+    const importer = getImporter();
+    if (!importer) return;
+
+    setGpError(null);
+    setGpItems([]);
+    setGpNextPageToken(undefined);
+    setGpLoading(true);
+
+    try {
+      const session = await importer.createPickerSession();
+
+      // "5s" → 5000ms
+      const rawInterval = session.pollingConfig?.pollInterval ?? "5s";
+      const pollIntervalMs = (parseFloat(rawInterval) || 5) * 1000;
+
+      setGpSession({ id: session.id, pollIntervalMs });
+
+      // クリックハンドラ内でポップアップを開く（ポップアップブロッカー対策）
+      window.open(session.pickerUri, "_blank", "width=1000,height=700");
+
+      setGpPolling(true);
+      pollSession(session.id, pollIntervalMs, importer);
+    } catch (e) {
+      setGpError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGpLoading(false);
+    }
+  }, [getImporter, pollSession]);
+
+  const loadMorePickerItems = useCallback(async () => {
+    if (!gpSession || !gpNextPageToken) return;
+    const importer = getImporter();
+    if (!importer) return;
+
+    setGpLoading(true);
+    try {
+      const result = await importer.listPickerMediaItems(gpSession.id, gpNextPageToken);
+      setGpItems((prev) => [...prev, ...result.mediaItems]);
+      setGpNextPageToken(result.nextPageToken);
+    } catch (e) {
+      setGpError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGpLoading(false);
+    }
+  }, [gpSession, gpNextPageToken, getImporter]);
 
   // ------------------------------------------------------------------
   // Google Drive 検索
@@ -181,7 +243,7 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
   // ------------------------------------------------------------------
 
   const importGooglePhoto = useCallback(
-    async (item: GooglePhotosMediaItem) => {
+    async (item: PickerMediaItem) => {
       const importer = getImporter();
       if (!importer) return;
       setImporting(item.id);
@@ -214,24 +276,36 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
     [getImporter, onImported],
   );
 
-  // Tab 切り替え時にリセット（世代カウンタを進めて in-flight リクエストの結果を破棄）
+  // Tab 切り替え時にポーリングをリセット
   useEffect(() => {
-    gpSearchGenRef.current++;
-    drSearchGenRef.current++;
+    stopPolling();
+    if (gpSession) {
+      const importer = getImporter();
+      importer?.deletePickerSession(gpSession.id).catch(() => {});
+      setGpSession(null);
+    }
     setGpItems([]);
     setGpNextPageToken(undefined);
     setGpError(null);
-    setGpLoading(false);
     setDrFiles([]);
     setDrNextPageToken(undefined);
     setDrError(null);
     setDrLoading(false);
+    drSearchGenRef.current++;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  // アンマウント時にポーリング停止
+  useEffect(() => {
+    return () => {
+      stopPolling();
+    };
+  }, [stopPolling]);
 
   if (!accessToken) {
     return (
       <div className="p-4 text-gray-500 text-sm">
-        写真を検索するにはログインが必要です。
+        写真を取り込むにはログインが必要です。
       </div>
     );
   }
@@ -265,93 +339,94 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
       {/* Google Photos パネル */}
       {tab === "google_photos" && (
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-2 items-end">
-            <label className="flex flex-col gap-1 text-xs text-gray-600">
-              開始日
-              <input
-                type="date"
-                value={gpStartDate}
-                onChange={(e) => setGpStartDate(e.target.value)}
-                className="border border-gray-300 rounded px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-600">
-              終了日
-              <input
-                type="date"
-                value={gpEndDate}
-                onChange={(e) => setGpEndDate(e.target.value)}
-                className="border border-gray-300 rounded px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-600 flex-1 min-w-32">
-              キーワード（ファイル名）
-              <input
-                type="text"
-                value={gpKeyword}
-                onChange={(e) => setGpKeyword(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && searchGooglePhotos(false)}
-                placeholder="部分一致"
-                className="border border-gray-300 rounded px-2 py-1 text-sm"
-              />
-            </label>
-            <button
-              onClick={() => searchGooglePhotos(false)}
-              disabled={gpLoading}
-              className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded transition-colors disabled:opacity-50"
-            >
-              {gpLoading ? "検索中…" : "検索"}
-            </button>
-          </div>
-
-          {gpError && (
-            <p className="text-red-500 text-sm">{gpError}</p>
-          )}
-
-          {gpItems.length > 0 && (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {gpItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="relative group rounded overflow-hidden border border-gray-200 bg-gray-50 aspect-square"
-                >
-                  <img
-                    src={PhotoImporter.getThumbnailUrl(item.baseUrl, 200, 200)}
-                    alt={item.filename}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">
-                    <p className="text-white text-xs text-center px-1 truncate w-full text-center">
-                      {item.filename}
-                    </p>
-                    <button
-                      onClick={() => importGooglePhoto(item)}
-                      disabled={importing === item.id}
-                      className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition-colors disabled:opacity-50"
-                    >
-                      {importing === item.id ? "取り込み中…" : "インポート"}
-                    </button>
-                  </div>
-                </div>
-              ))}
+          {!gpSession && !gpPolling && gpItems.length === 0 && (
+            <div className="flex flex-col items-center gap-4 py-10">
+              <p className="text-sm text-gray-500 text-center max-w-sm">
+                Google Photos のピッカーを開いて写真を選択してください。選択後、自動的にここに表示されます。
+              </p>
+              <button
+                onClick={openGooglePhotosPicker}
+                disabled={gpLoading}
+                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {gpLoading ? "準備中…" : "Google Photos を開く"}
+              </button>
             </div>
           )}
 
-          {/* nextPageToken がある限りページングボタンを表示（キーワードフィルタでヒット0でも続きがある場合がある） */}
-          {gpNextPageToken && (
-            <button
-              onClick={() => searchGooglePhotos(true)}
-              disabled={gpLoading}
-              className="self-center px-4 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors disabled:opacity-50"
-            >
-              {gpLoading ? "読み込み中…" : "さらに読み込む"}
-            </button>
+          {gpPolling && (
+            <div className="flex flex-col items-center gap-3 py-10">
+              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-gray-600">Google Photos で写真を選択してください…</p>
+              <button
+                onClick={cancelPickerSession}
+                className="text-xs text-gray-400 hover:text-gray-600 underline"
+              >
+                キャンセル
+              </button>
+            </div>
           )}
 
-          {!gpLoading && gpItems.length === 0 && !gpNextPageToken && (
-            <p className="text-gray-400 text-sm text-center py-6">
-              日付範囲やキーワードを指定して検索してください。
-            </p>
+          {gpError && (
+            <div className="flex flex-col gap-2">
+              <p className="text-red-500 text-sm">{gpError}</p>
+              <button
+                onClick={() => { setGpError(null); setGpSession(null); }}
+                className="self-start text-xs text-blue-500 hover:underline"
+              >
+                再試行
+              </button>
+            </div>
+          )}
+
+          {gpItems.length > 0 && (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-600">{gpItems.length} 件選択済み</p>
+                <button
+                  onClick={cancelPickerSession}
+                  className="text-xs text-gray-400 hover:text-gray-600 underline"
+                >
+                  クリア
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                {gpItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="relative group rounded overflow-hidden border border-gray-200 bg-gray-50 aspect-square"
+                  >
+                    <img
+                      src={PhotoImporter.getThumbnailUrl(item.mediaFile.baseUrl, 200, 200)}
+                      alt={item.mediaFile.filename}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">
+                      <p className="text-white text-xs text-center px-1 truncate w-full">
+                        {item.mediaFile.filename}
+                      </p>
+                      <button
+                        onClick={() => importGooglePhoto(item)}
+                        disabled={importing === item.id}
+                        className="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition-colors disabled:opacity-50"
+                      >
+                        {importing === item.id ? "取り込み中…" : "インポート"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {gpNextPageToken && (
+                <button
+                  onClick={loadMorePickerItems}
+                  disabled={gpLoading}
+                  className="self-center px-4 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  {gpLoading ? "読み込み中…" : "さらに読み込む"}
+                </button>
+              )}
+            </>
           )}
         </div>
       )}

@@ -186,7 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       "https://www.googleapis.com/auth/drive.file",
       "https://www.googleapis.com/auth/drive.appdata",
       "https://www.googleapis.com/auth/drive.metadata.readonly",
-      "https://www.googleapis.com/auth/photoslibrary.readonly",
+      "https://www.googleapis.com/auth/photospicker.mediaitems.readonly",
     ].join(" "),
   });
 
