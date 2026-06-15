@@ -11,6 +11,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: "/sessions", label: "セッション一覧", icon: "📓" },
+  { href: "/photos", label: "写真インポート", icon: "🖼️" },
   { href: "/articles/new", label: "記事を作成", icon: "✏️" },
   { href: "/settings", label: "設定", icon: "⚙️" },
 ];

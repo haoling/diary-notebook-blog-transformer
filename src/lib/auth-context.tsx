@@ -179,8 +179,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     },
     onError: clearAuth,
-    scope:
-      "openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata",
+    scope: [
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/drive.appdata",
+      "https://www.googleapis.com/auth/drive.metadata.readonly",
+      "https://www.googleapis.com/auth/photospicker.mediaitems.readonly",
+    ].join(" "),
   });
 
   const logout = useCallback(() => {
