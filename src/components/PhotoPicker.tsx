@@ -396,8 +396,9 @@ export function PhotoPicker({ onImported }: PhotoPickerProps) {
                     key={item.id}
                     className="relative group rounded overflow-hidden border border-gray-200 bg-gray-50 aspect-square"
                   >
-                    <img
-                      src={PhotoImporter.getThumbnailUrl(item.mediaFile.baseUrl, 200, 200)}
+                    <AuthedThumbnail
+                      thumbnailLink={PhotoImporter.getThumbnailUrl(item.mediaFile.baseUrl, 200, 200)}
+                      accessToken={accessToken}
                       alt={item.mediaFile.filename}
                       className="w-full h-full object-cover"
                     />
