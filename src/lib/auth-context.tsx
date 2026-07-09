@@ -28,6 +28,8 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   /** 初回マウント時に sessionStorage から認証状態を復元中か */
   isRestoring: boolean;
+  /** アクセストークンの有効期限（ミリ秒 Unix タイムスタンプ）。未認証時は null */
+  tokenExpiresAt: number | null;
   login: () => void;
   logout: () => void;
 }
@@ -82,6 +84,7 @@ function loadPersistedAuth(): PersistedAuth | null {
 interface AuthState {
   user: UserInfo | null;
   accessToken: string | null;
+  tokenExpiresAt: number | null;
   isRestoring: boolean;
 }
 
@@ -96,22 +99,25 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       return {
         user: action.payload.userInfo,
         accessToken: action.payload.token,
+        tokenExpiresAt: action.payload.expiresAt,
         isRestoring: false,
       };
     case "LOGIN":
       return {
         user: action.payload.userInfo,
         accessToken: action.payload.token,
+        tokenExpiresAt: Date.now() + action.payload.expiresIn * 1000,
         isRestoring: false,
       };
     case "CLEAR":
-      return { user: null, accessToken: null, isRestoring: false };
+      return { user: null, accessToken: null, tokenExpiresAt: null, isRestoring: false };
   }
 }
 
 const INITIAL_STATE: AuthState = {
   user: null,
   accessToken: null,
+  tokenExpiresAt: null,
   isRestoring: true,
 };
 
@@ -201,6 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         accessToken: state.accessToken,
         isAuthenticated: !!state.user && !!state.accessToken,
         isRestoring: state.isRestoring,
+        tokenExpiresAt: state.tokenExpiresAt,
         login,
         logout,
       }}

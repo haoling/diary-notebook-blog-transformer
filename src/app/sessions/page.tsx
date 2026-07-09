@@ -56,14 +56,37 @@ export default function SessionsPage() {
   }, [index]);
 
   useEffect(() => {
-    const hash = window.location.hash.slice(1);
-    setActiveSessionId(hash || null);
-
-    const onHashChange = () => {
+    const syncFromUrl = () => {
       setActiveSessionId(window.location.hash.slice(1) || null);
     };
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
+    syncFromUrl();
+
+    // hashchange: window.location.hash 直接変更時
+    // popstate: history.back() / history.go() など履歴操作時
+    window.addEventListener("hashchange", syncFromUrl);
+    window.addEventListener("popstate", syncFromUrl);
+
+    // Next.js <Link> は history.pushState を使うが pushState では popstate が発火しない。
+    // pushState / replaceState をフックして URL 変更を検知する。
+    // bind() は使わず元の関数参照を保持し apply(history, args) で呼ぶことで
+    // cleanup 後に真のネイティブ関数に戻せるようにする。
+    const origPushState = history.pushState;
+    const origReplaceState = history.replaceState;
+    history.pushState = function (...args: Parameters<typeof history.pushState>) {
+      origPushState.apply(history, args);
+      syncFromUrl();
+    };
+    history.replaceState = function (...args: Parameters<typeof history.replaceState>) {
+      origReplaceState.apply(history, args);
+      syncFromUrl();
+    };
+
+    return () => {
+      window.removeEventListener("hashchange", syncFromUrl);
+      window.removeEventListener("popstate", syncFromUrl);
+      history.pushState = origPushState;
+      history.replaceState = origReplaceState;
+    };
   }, []);
 
   const handleSelectSession = useCallback((id: string) => {
