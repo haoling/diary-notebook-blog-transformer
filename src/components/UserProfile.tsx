@@ -4,8 +4,9 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { ReAuthDialog } from "@/components/ReAuthDialog";
 
-const WARNING_THRESHOLD_SEC = 300; // 5分前から警告
-const DISMISS_SNOOZE_MS = 60_000;  // 「後で」を押したら1分間非表示
+const WARNING_THRESHOLD_SEC = 300; // 5分前から警告（amber）
+const URGENT_THRESHOLD_SEC = 30;  // 30秒前から緊急警告（red）。自動ログアウト直前で到達可能
+const DISMISS_SNOOZE_MS = 60_000; // 「後で」を押したら1分間非表示
 // AuthProvider は tokenExpiresAt の 60 秒前に自動ログアウトする。
 // カウントダウンをその実効期限（実際にセッションが切れる時刻）基準にすることで
 // remainingSec <= 0 が「まもなく自動ログアウト」を正しく表す。
@@ -43,7 +44,10 @@ export function UserProfile() {
     remainingSec <= WARNING_THRESHOLD_SEC &&
     Date.now() >= snoozedUntil;
 
-  const expired = remainingSec !== null && remainingSec <= 0;
+  // AuthProvider は effectiveExpiresAt (= tokenExpiresAt - 60s) で clearAuth() を呼ぶため
+  // remainingSec <= 0 直後に user が null になりバッジは消える。
+  // 30秒以内を「緊急」(赤) として表示し、自動ログアウト直前に実際に到達可能にする。
+  const urgent = remainingSec !== null && remainingSec <= URGENT_THRESHOLD_SEC;
 
   const formatRemaining = () => {
     if (remainingSec === null) return "";
@@ -60,16 +64,16 @@ export function UserProfile() {
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
-            title={`トークン有効期限: 残り ${formatRemaining()}`}
+            aria-label={`セッション期限警告: 残り ${formatRemaining()}。クリックして再ログイン`}
             className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg border transition-colors ${
-              expired
+              urgent
                 ? "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
                 : "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100"
             }`}
           >
-            <span aria-hidden="true">{expired ? "🔴" : "⚠️"}</span>
+            <span aria-hidden="true">{urgent ? "🔴" : "⚠️"}</span>
             <span className="hidden sm:inline">
-              {expired ? "期限切れ" : `残り ${formatRemaining()}`}
+              {urgent ? "まもなく自動ログアウト" : `残り ${formatRemaining()}`}
             </span>
           </button>
         )}

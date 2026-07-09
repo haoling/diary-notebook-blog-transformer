@@ -68,14 +68,16 @@ export default function SessionsPage() {
 
     // Next.js <Link> は history.pushState を使うが pushState では popstate が発火しない。
     // pushState / replaceState をフックして URL 変更を検知する。
-    const origPushState = history.pushState.bind(history);
-    const origReplaceState = history.replaceState.bind(history);
-    history.pushState = (...args: Parameters<typeof history.pushState>) => {
-      origPushState(...args);
+    // bind() は使わず元の関数参照を保持し apply(history, args) で呼ぶことで
+    // cleanup 後に真のネイティブ関数に戻せるようにする。
+    const origPushState = history.pushState;
+    const origReplaceState = history.replaceState;
+    history.pushState = function (...args: Parameters<typeof history.pushState>) {
+      origPushState.apply(history, args);
       syncFromUrl();
     };
-    history.replaceState = (...args: Parameters<typeof history.replaceState>) => {
-      origReplaceState(...args);
+    history.replaceState = function (...args: Parameters<typeof history.replaceState>) {
+      origReplaceState.apply(history, args);
       syncFromUrl();
     };
 
