@@ -60,12 +60,30 @@ export default function SessionsPage() {
       setActiveSessionId(window.location.hash.slice(1) || null);
     };
     syncFromUrl();
-    // hashchange: ハッシュ直接操作時、popstate: Next.js <Link> ナビゲーション時
+
+    // hashchange: window.location.hash 直接変更時
+    // popstate: history.back() / history.go() など履歴操作時
     window.addEventListener("hashchange", syncFromUrl);
     window.addEventListener("popstate", syncFromUrl);
+
+    // Next.js <Link> は history.pushState を使うが pushState では popstate が発火しない。
+    // pushState / replaceState をフックして URL 変更を検知する。
+    const origPushState = history.pushState.bind(history);
+    const origReplaceState = history.replaceState.bind(history);
+    history.pushState = (...args: Parameters<typeof history.pushState>) => {
+      origPushState(...args);
+      syncFromUrl();
+    };
+    history.replaceState = (...args: Parameters<typeof history.replaceState>) => {
+      origReplaceState(...args);
+      syncFromUrl();
+    };
+
     return () => {
       window.removeEventListener("hashchange", syncFromUrl);
       window.removeEventListener("popstate", syncFromUrl);
+      history.pushState = origPushState;
+      history.replaceState = origReplaceState;
     };
   }, []);
 

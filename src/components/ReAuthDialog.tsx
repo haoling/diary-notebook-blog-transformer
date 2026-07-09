@@ -8,11 +8,17 @@ interface ReAuthDialogProps {
 export function ReAuthDialog({ onConfirm, onDismiss }: ReAuthDialogProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
-        <h2 className="text-base font-semibold text-slate-800 mb-2">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reauth-title"
+        aria-describedby="reauth-desc"
+        className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4"
+      >
+        <h2 id="reauth-title" className="text-base font-semibold text-slate-800 mb-2">
           セッションの有効期限が近づいています
         </h2>
-        <p className="text-sm text-slate-600 mb-5">
+        <p id="reauth-desc" className="text-sm text-slate-600 mb-5">
           アクセストークンがまもなく期限切れになります。今すぐ再ログインしますか？
         </p>
         <div className="flex justify-end gap-3">

@@ -14,16 +14,20 @@ export function UserProfile() {
   const [snoozedUntil, setSnoozedUntil] = useState<number>(0);
 
   useEffect(() => {
-    if (!tokenExpiresAt) {
+    if (tokenExpiresAt === null) {
       setRemainingSec(null);
       return;
     }
-    const update = () => {
-      setRemainingSec(Math.round((tokenExpiresAt - Date.now()) / 1000));
+    // 警告閾値（5分）より前は30秒間隔、閾値内は1秒間隔でカウントダウン更新
+    let timerId: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      const r = Math.round((tokenExpiresAt - Date.now()) / 1000);
+      setRemainingSec(r);
+      const nextMs = r > WARNING_THRESHOLD_SEC ? 30_000 : 1_000;
+      timerId = setTimeout(tick, nextMs);
     };
-    update();
-    const id = setInterval(update, 1000);
-    return () => clearInterval(id);
+    tick();
+    return () => clearTimeout(timerId);
   }, [tokenExpiresAt]);
 
   if (!user) return null;
