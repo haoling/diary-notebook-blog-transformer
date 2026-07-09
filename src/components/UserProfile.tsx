@@ -6,6 +6,10 @@ import { ReAuthDialog } from "@/components/ReAuthDialog";
 
 const WARNING_THRESHOLD_SEC = 300; // 5分前から警告
 const DISMISS_SNOOZE_MS = 60_000;  // 「後で」を押したら1分間非表示
+// AuthProvider は tokenExpiresAt の 60 秒前に自動ログアウトする。
+// カウントダウンをその実効期限（実際にセッションが切れる時刻）基準にすることで
+// remainingSec <= 0 が「まもなく自動ログアウト」を正しく表す。
+const LOGOUT_BUFFER_MS = 60_000;
 
 export function UserProfile() {
   const { user, logout, login, tokenExpiresAt } = useAuth();
@@ -18,10 +22,12 @@ export function UserProfile() {
       setRemainingSec(null);
       return;
     }
-    // 警告閾値（5分）より前は30秒間隔、閾値内は1秒間隔でカウントダウン更新
+    // 実効期限（AuthProvider が自動ログアウトする時刻）基準でカウントダウン
+    // 警告閾値（5分）より前は30秒間隔、閾値内は1秒間隔で更新
+    const effectiveExpiresAt = tokenExpiresAt - LOGOUT_BUFFER_MS;
     let timerId: ReturnType<typeof setTimeout>;
     const tick = () => {
-      const r = Math.round((tokenExpiresAt - Date.now()) / 1000);
+      const r = Math.round((effectiveExpiresAt - Date.now()) / 1000);
       setRemainingSec(r);
       const nextMs = r > WARNING_THRESHOLD_SEC ? 30_000 : 1_000;
       timerId = setTimeout(tick, nextMs);
