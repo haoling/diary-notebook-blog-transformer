@@ -121,15 +121,15 @@ export class ArticleManager {
     const files = await this.client.listAppDataFiles();
     const articleFiles = files.filter((f) => parseArticleFileName(f.name) !== null);
 
-    const articles: Article[] = [];
-    for (const file of articleFiles) {
-      try {
-        const article = await this.client.getFileContent<Article>(file.id);
-        articles.push(article);
-      } catch (err) {
-        console.warn(`記事の読み込みに失敗しました (${file.name}):`, err);
-      }
-    }
+    const results = await Promise.all(
+      articleFiles.map((file) =>
+        this.client.getFileContent<Article>(file.id).catch((err) => {
+          console.warn(`記事の読み込みに失敗しました (${file.name}):`, err);
+          return null;
+        }),
+      ),
+    );
+    const articles = results.filter((a): a is Article => a !== null);
 
     articles.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return articles;
@@ -249,13 +249,25 @@ export function useCorrectedPageImages(
   const requestedRef = useRef<Set<string>>(new Set());
   const urlsRef = useRef<Set<string>>(new Set());
 
+  // client（アクセストークン更新等）が切り替わったら、旧キャッシュを破棄し生成済み URL を解放する。
+  // このクリーンアップは client 変更時とアンマウント時の両方で実行される。
+  useEffect(() => {
+    const requested = requestedRef.current;
+    const urls = urlsRef.current;
+    return () => {
+      requested.clear();
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
+      setState({});
+    };
+  }, [client]);
+
   useEffect(() => {
     if (!client) return;
     let cancelled = false;
     for (const page of pages) {
       if (requestedRef.current.has(page.id)) continue;
       requestedRef.current.add(page.id);
-      setState((prev) => ({ ...prev, [page.id]: { status: "loading" } }));
 
       getCorrectedPageImageUrl(client, page)
         .then((url) => {
@@ -278,14 +290,6 @@ export function useCorrectedPageImages(
     };
   }, [client, pages]);
 
-  useEffect(() => {
-    const urls = urlsRef.current;
-    return () => {
-      urls.forEach((url) => URL.revokeObjectURL(url));
-      urls.clear();
-    };
-  }, []);
-
   return state;
 }
 
@@ -302,6 +306,19 @@ export function usePhotoThumbnails(
   const [state, setState] = useState<Record<string, ResolvedImage>>({});
   const requestedRef = useRef<Set<string>>(new Set());
   const urlsRef = useRef<Set<string>>(new Set());
+
+  // client / photoImporter（アクセストークン更新等）が切り替わったら、旧キャッシュを破棄し
+  // 生成済み URL を解放する。このクリーンアップは依存変更時とアンマウント時の両方で実行される。
+  useEffect(() => {
+    const requested = requestedRef.current;
+    const urls = urlsRef.current;
+    return () => {
+      requested.clear();
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
+      setState({});
+    };
+  }, [client, photoImporter]);
 
   useEffect(() => {
     if (!client || !photoImporter) return;
@@ -321,7 +338,6 @@ export function usePhotoThumbnails(
     for (const photo of photos) {
       if (requestedRef.current.has(photo.id)) continue;
       requestedRef.current.add(photo.id);
-      setState((prev) => ({ ...prev, [photo.id]: { status: "loading" } }));
 
       resolve(photo)
         .then((url) => {
@@ -344,14 +360,6 @@ export function usePhotoThumbnails(
       cancelled = true;
     };
   }, [client, photoImporter, photos]);
-
-  useEffect(() => {
-    const urls = urlsRef.current;
-    return () => {
-      urls.forEach((url) => URL.revokeObjectURL(url));
-      urls.clear();
-    };
-  }, []);
 
   return state;
 }

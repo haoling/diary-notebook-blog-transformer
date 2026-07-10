@@ -86,7 +86,7 @@ function PreviewBody({ preview }: { preview: ObjectCardPreview }) {
   if (!preview.imageUrl) {
     return (
       <div className="flex items-center justify-center aspect-square bg-slate-50 rounded border border-slate-200">
-        <div className="text-slate-400 text-xs">No image</div>
+        <div className="text-slate-400 text-xs">画像なし</div>
       </div>
     );
   }

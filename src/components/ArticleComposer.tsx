@@ -393,11 +393,12 @@ export function ArticleComposer({ articleId }: ArticleComposerProps) {
     setDeleting(true);
     try {
       await managers.articleManager.deleteArticle(article.id);
+      setDeleteConfirmOpen(false);
       router.push("/articles");
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "記事の削除に失敗しました。");
+    } finally {
       setDeleting(false);
-      setDeleteConfirmOpen(false);
     }
   }, [article, managers, router]);
 
