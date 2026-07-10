@@ -124,15 +124,15 @@ export class ArticleManager {
     const files = await this.client.listAppDataFiles();
     const articleFiles = files.filter((f) => parseArticleFileName(f.name) !== null);
 
-    const results = await Promise.all(
-      articleFiles.map((file) =>
-        this.client.getFileContent<Article>(file.id).catch((err) => {
-          console.warn(`記事の読み込みに失敗しました (${file.name}):`, err);
-          return null;
-        }),
-      ),
-    );
-    const articles = results.filter((a): a is Article => a !== null);
+    const articles: Article[] = [];
+    for (const file of articleFiles) {
+      try {
+        const article = await this.client.getFileContent<Article>(file.id);
+        articles.push(article);
+      } catch (err) {
+        console.warn(`記事の読み込みに失敗しました (${file.name}):`, err);
+      }
+    }
 
     articles.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return articles;
@@ -250,17 +250,18 @@ export function useCorrectedPageImages(
 ): Record<string, ResolvedImage> {
   const [state, setState] = useState<Record<string, ResolvedImage>>({});
   const requestedRef = useRef<Set<string>>(new Set());
-  const urlsRef = useRef<Set<string>>(new Set());
+  // ページ ID → 生成済み Blob URL。対象から外れたページの URL をピンポイントで解放するために使う。
+  const urlsByIdRef = useRef<Map<string, string>>(new Map());
 
   // client（アクセストークン更新等）が切り替わったら、旧キャッシュを破棄し生成済み URL を解放する。
   // このクリーンアップは client 変更時とアンマウント時の両方で実行される。
   useEffect(() => {
     const requested = requestedRef.current;
-    const urls = urlsRef.current;
+    const urlsById = urlsByIdRef.current;
     return () => {
       requested.clear();
-      urls.forEach((url) => URL.revokeObjectURL(url));
-      urls.clear();
+      urlsById.forEach((url) => URL.revokeObjectURL(url));
+      urlsById.clear();
       setState({});
     };
   }, [client]);
@@ -268,6 +269,26 @@ export function useCorrectedPageImages(
   useEffect(() => {
     if (!client) return;
     let cancelled = false;
+
+    // pages から外れたページのキャッシュ・Blob URL を解放する
+    const currentIds = new Set(pages.map((p) => p.id));
+    const staleIds = [...requestedRef.current].filter((id) => !currentIds.has(id));
+    if (staleIds.length > 0) {
+      for (const id of staleIds) {
+        requestedRef.current.delete(id);
+        const url = urlsByIdRef.current.get(id);
+        if (url) {
+          URL.revokeObjectURL(url);
+          urlsByIdRef.current.delete(id);
+        }
+      }
+      setState((prev) => {
+        const next = { ...prev };
+        for (const id of staleIds) delete next[id];
+        return next;
+      });
+    }
+
     for (const page of pages) {
       if (requestedRef.current.has(page.id)) continue;
       requestedRef.current.add(page.id);
@@ -278,7 +299,7 @@ export function useCorrectedPageImages(
             URL.revokeObjectURL(url);
             return;
           }
-          urlsRef.current.add(url);
+          urlsByIdRef.current.set(page.id, url);
           setState((prev) => ({ ...prev, [page.id]: { status: "ready", url } }));
         })
         .catch((err) => {
@@ -308,17 +329,18 @@ export function usePhotoThumbnails(
 ): Record<string, ResolvedImage> {
   const [state, setState] = useState<Record<string, ResolvedImage>>({});
   const requestedRef = useRef<Set<string>>(new Set());
-  const urlsRef = useRef<Set<string>>(new Set());
+  // 写真 ID → 生成済み Blob URL。対象から外れた写真の URL をピンポイントで解放するために使う。
+  const urlsByIdRef = useRef<Map<string, string>>(new Map());
 
   // client / photoImporter（アクセストークン更新等）が切り替わったら、旧キャッシュを破棄し
   // 生成済み URL を解放する。このクリーンアップは依存変更時とアンマウント時の両方で実行される。
   useEffect(() => {
     const requested = requestedRef.current;
-    const urls = urlsRef.current;
+    const urlsById = urlsByIdRef.current;
     return () => {
       requested.clear();
-      urls.forEach((url) => URL.revokeObjectURL(url));
-      urls.clear();
+      urlsById.forEach((url) => URL.revokeObjectURL(url));
+      urlsById.clear();
       setState({});
     };
   }, [client, photoImporter]);
@@ -338,6 +360,25 @@ export function usePhotoThumbnails(
       return URL.createObjectURL(blob);
     }
 
+    // photos から外れた写真のキャッシュ・Blob URL を解放する
+    const currentIds = new Set(photos.map((p) => p.id));
+    const staleIds = [...requestedRef.current].filter((id) => !currentIds.has(id));
+    if (staleIds.length > 0) {
+      for (const id of staleIds) {
+        requestedRef.current.delete(id);
+        const url = urlsByIdRef.current.get(id);
+        if (url) {
+          URL.revokeObjectURL(url);
+          urlsByIdRef.current.delete(id);
+        }
+      }
+      setState((prev) => {
+        const next = { ...prev };
+        for (const id of staleIds) delete next[id];
+        return next;
+      });
+    }
+
     for (const photo of photos) {
       if (requestedRef.current.has(photo.id)) continue;
       requestedRef.current.add(photo.id);
@@ -348,7 +389,7 @@ export function usePhotoThumbnails(
             URL.revokeObjectURL(url);
             return;
           }
-          urlsRef.current.add(url);
+          urlsByIdRef.current.set(photo.id, url);
           setState((prev) => ({ ...prev, [photo.id]: { status: "ready", url } }));
         })
         .catch((err) => {

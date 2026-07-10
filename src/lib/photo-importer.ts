@@ -321,15 +321,15 @@ export class PhotoImporter {
     const files = await this.client.listAppDataFiles();
     const photoFiles = files.filter((f) => parsePhotoFileName(f.name) !== null);
 
-    const results = await Promise.all(
-      photoFiles.map((file) =>
-        this.client.getFileContent<PhotoObject>(file.id).catch((err) => {
-          console.warn(`写真の読み込みに失敗しました (${file.name}):`, err);
-          return null;
-        }),
-      ),
-    );
-    const photos = results.filter((p): p is PhotoObject => p !== null);
+    const photos: PhotoObject[] = [];
+    for (const file of photoFiles) {
+      try {
+        const photo = await this.client.getFileContent<PhotoObject>(file.id);
+        photos.push(photo);
+      } catch (err) {
+        console.warn(`写真の読み込みに失敗しました (${file.name}):`, err);
+      }
+    }
 
     photos.sort(
       (a, b) => new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime(),
