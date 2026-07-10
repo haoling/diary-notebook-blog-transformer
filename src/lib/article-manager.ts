@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect, useRef } from "react";
 import { DriveClient } from "./drive-client";
 import { DriveNotFoundError } from "./drive-errors";
