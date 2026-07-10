@@ -280,8 +280,8 @@ export function ArticleComposer({ articleId }: ArticleComposerProps) {
     for (const resolved of composedParagraphResolved.values()) {
       if (!resolved) continue;
       const ocr = resolved.paragraph.ocr;
-      const hasText = ocr && !ocr.skipped && (ocr.editedText ?? ocr.text);
-      if (!hasText && !pages.has(resolved.page.id)) pages.set(resolved.page.id, resolved.page);
+      const hasOcrText = ocr && !ocr.skipped;
+      if (!hasOcrText && !pages.has(resolved.page.id)) pages.set(resolved.page.id, resolved.page);
     }
     return [...pages.values()];
   }, [composedParagraphResolved]);

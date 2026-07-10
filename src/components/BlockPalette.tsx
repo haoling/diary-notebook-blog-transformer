@@ -163,8 +163,8 @@ export function BlockPalette({
     const pages = new Map<string, AvailableParagraph["page"]>();
     for (const item of availableParagraphs) {
       const ocr = item.paragraph.ocr;
-      const hasText = ocr && !ocr.skipped && (ocr.editedText ?? ocr.text);
-      if (!hasText && !pages.has(item.page.id)) pages.set(item.page.id, item.page);
+      const hasOcrText = ocr && !ocr.skipped;
+      if (!hasOcrText && !pages.has(item.page.id)) pages.set(item.page.id, item.page);
     }
     return [...pages.values()];
   }, [availableParagraphs]);

@@ -61,9 +61,12 @@ export class ArticleManager {
     const prev = this.mutationChains.get(articleId) ?? Promise.resolve();
     const next = prev.then(() => fn(), () => fn());
     this.mutationChains.set(articleId, next);
-    await next;
-    if (this.mutationChains.get(articleId) === next) {
-      this.mutationChains.delete(articleId);
+    try {
+      await next;
+    } finally {
+      if (this.mutationChains.get(articleId) === next) {
+        this.mutationChains.delete(articleId);
+      }
     }
   }
 
