@@ -268,12 +268,20 @@ export function useCorrectedPageImages(
   pages: ScanPage[],
 ): Record<string, ResolvedImage> {
   const [state, setState] = useState<Record<string, ResolvedImage>>({});
+  const [prevClient, setPrevClient] = useState(client);
   const requestedRef = useRef<Set<string>>(new Set());
   // ページ ID → 生成済み Blob URL。対象から外れたページの URL をピンポイントで解放するために使う。
   const urlsByIdRef = useRef<Map<string, string>>(new Map());
 
-  // client（アクセストークン更新等）が切り替わったら、旧キャッシュを破棄し生成済み URL を解放する。
-  // このクリーンアップは client 変更時とアンマウント時の両方で実行される。
+  // client（アクセストークン更新等）が切り替わったら、次のレンダー前に state をリセットする。
+  // レンダー中に props の変化を検知して state を調整する公式パターン（effect 内での setState は避ける）。
+  if (client !== prevClient) {
+    setPrevClient(client);
+    setState({});
+  }
+
+  // client が切り替わったら、旧キャッシュの参照と生成済み URL を解放する。
+  // 副作用（URL.revokeObjectURL）のみを扱い、state の更新は行わない。
   useEffect(() => {
     const requested = requestedRef.current;
     const urlsById = urlsByIdRef.current;
@@ -281,7 +289,6 @@ export function useCorrectedPageImages(
       requested.clear();
       urlsById.forEach((url) => URL.revokeObjectURL(url));
       urlsById.clear();
-      setState({});
     };
   }, [client]);
 
@@ -347,12 +354,23 @@ export function usePhotoThumbnails(
   photos: PhotoObject[],
 ): Record<string, ResolvedImage> {
   const [state, setState] = useState<Record<string, ResolvedImage>>({});
+  const [prevDeps, setPrevDeps] = useState<{ client: DriveClient | null; photoImporter: PhotoImporter | null }>({
+    client,
+    photoImporter,
+  });
   const requestedRef = useRef<Set<string>>(new Set());
   // 写真 ID → 生成済み Blob URL。対象から外れた写真の URL をピンポイントで解放するために使う。
   const urlsByIdRef = useRef<Map<string, string>>(new Map());
 
-  // client / photoImporter（アクセストークン更新等）が切り替わったら、旧キャッシュを破棄し
-  // 生成済み URL を解放する。このクリーンアップは依存変更時とアンマウント時の両方で実行される。
+  // client / photoImporter（アクセストークン更新等）が切り替わったら、次のレンダー前に state をリセットする。
+  // レンダー中に props の変化を検知して state を調整する公式パターン（effect 内での setState は避ける）。
+  if (client !== prevDeps.client || photoImporter !== prevDeps.photoImporter) {
+    setPrevDeps({ client, photoImporter });
+    setState({});
+  }
+
+  // client / photoImporter が切り替わったら、旧キャッシュの参照と生成済み URL を解放する。
+  // 副作用（URL.revokeObjectURL）のみを扱い、state の更新は行わない。
   useEffect(() => {
     const requested = requestedRef.current;
     const urlsById = urlsByIdRef.current;
@@ -360,7 +378,6 @@ export function usePhotoThumbnails(
       requested.clear();
       urlsById.forEach((url) => URL.revokeObjectURL(url));
       urlsById.clear();
-      setState({});
     };
   }, [client, photoImporter]);
 
