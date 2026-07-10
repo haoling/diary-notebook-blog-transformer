@@ -537,7 +537,7 @@ export function ArticleComposer({ articleId }: ArticleComposerProps) {
                     index={index}
                     photo={photo}
                     imageUrl={thumb?.url ?? null}
-                    imageLoading={thumb?.status !== "ready" && thumb?.status !== "error"}
+                    imageLoading={photo !== null && thumb?.status !== "ready" && thumb?.status !== "error"}
                     onDelete={() => handleDeleteBlock(key)}
                   />
                 );

@@ -87,22 +87,39 @@ export class ArticleManager {
   async saveArticle(article: Article): Promise<void> {
     await this.runSerialized(article.id, async () => {
       const fileName = articleFileName(article.id);
+      let createdFileId: string | null = null;
       try {
         const fileId = await this.getArticleFileId(article.id);
         await this.client.updateFileContent(fileId, article);
       } catch (err) {
         if (err instanceof DriveNotFoundError) {
-          await this.client.createAppDataFile(fileName, article);
+          const created = await this.client.createAppDataFile(fileName, article);
+          createdFileId = created.id;
         } else {
           throw err;
         }
       }
 
-      await this.indexManager.addArticle({
-        id: article.id,
-        title: article.title,
-        date: article.date,
-      });
+      try {
+        await this.indexManager.addArticle({
+          id: article.id,
+          title: article.title,
+          date: article.date,
+        });
+      } catch (indexErr) {
+        // 新規作成時のみロールバック対象。既存ファイルの更新失敗はデータ喪失になるため削除しない
+        if (createdFileId) {
+          try {
+            await this.client.deleteFile(createdFileId);
+          } catch (rollbackErr) {
+            console.warn(
+              `インデックス更新失敗後の記事ファイルロールバックに失敗しました (fileId: ${createdFileId}):`,
+              rollbackErr,
+            );
+          }
+        }
+        throw indexErr;
+      }
     });
   }
 
