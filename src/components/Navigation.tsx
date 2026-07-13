@@ -12,7 +12,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/sessions", label: "セッション一覧", icon: "📓" },
   { href: "/photos", label: "写真インポート", icon: "🖼️" },
-  { href: "/articles/new", label: "記事を作成", icon: "✏️" },
+  { href: "/articles", label: "記事一覧", icon: "📝" },
   { href: "/settings", label: "設定", icon: "⚙️" },
 ];
 
@@ -23,8 +23,8 @@ export function Navigation() {
     <nav className="flex gap-1">
       {navItems.map((item) => {
         const isActive =
-          item.href === "/sessions"
-            ? pathname === "/sessions" || pathname.startsWith("/sessions/")
+          item.href === "/sessions" || item.href === "/articles"
+            ? pathname === item.href || pathname.startsWith(`${item.href}/`)
             : pathname === item.href;
 
         return (

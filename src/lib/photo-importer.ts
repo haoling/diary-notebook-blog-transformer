@@ -10,6 +10,14 @@ function photoFileName(id: string): string {
   return `${PHOTO_FILE_PREFIX}${id}.json`;
 }
 
+/** ファイル名から写真 ID を抽出する。 */
+function parsePhotoFileName(name: string): string | null {
+  if (!name.startsWith(PHOTO_FILE_PREFIX) || !name.endsWith(".json")) {
+    return null;
+  }
+  return name.slice(PHOTO_FILE_PREFIX.length, -".json".length);
+}
+
 /** Drive クエリ文字列値をエスケープする（`\` と `'`）。 */
 function escapeDriveQueryValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
@@ -175,6 +183,21 @@ export class PhotoImporter {
     });
   }
 
+  /**
+   * Picker セッションを経由せず、ID から直接メディアアイテムを取得する。
+   * 既に取り込み済みの写真のサムネイルを、ピッカーセッション終了後に再表示する用途で使用する。
+   */
+  async getMediaItem(mediaItemId: string): Promise<PickerMediaItem> {
+    const res = await fetch(`${PICKER_API_BASE}/mediaItems/${encodeURIComponent(mediaItemId)}`, {
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`Picker API error ${res.status}: ${JSON.stringify(err)}`);
+    }
+    return res.json() as Promise<PickerMediaItem>;
+  }
+
   // ------------------------------------------------------------------
   // Google Drive 画像検索
   // ------------------------------------------------------------------
@@ -291,6 +314,28 @@ export class PhotoImporter {
     }
 
     return photo;
+  }
+
+  /** appDataFolder 内の全 PhotoObject を一覧する（インポート日時の新しい順）。 */
+  async listAllPhotos(): Promise<PhotoObject[]> {
+    const files = await this.client.listAppDataFiles();
+    const photoFiles = files.filter((f) => parsePhotoFileName(f.name) !== null);
+
+    const photos: PhotoObject[] = [];
+    for (const file of photoFiles) {
+      try {
+        const photo = await this.client.getFileContent<PhotoObject>(file.id);
+        photos.push(photo);
+      } catch (err) {
+        console.warn(`写真の読み込みに失敗しました (${file.name}):`, err);
+      }
+    }
+
+    photos.sort(
+      (a, b) => new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime(),
+    );
+
+    return photos;
   }
 
   /** PhotoObject を appDataFolder から読み込む。 */

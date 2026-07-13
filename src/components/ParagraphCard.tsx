@@ -28,16 +28,18 @@ export type ParagraphCardProps = {
 // ヘルパー
 // ---------------------------------------------------------------------------
 
-/** Canvas で指定領域を切り抜きプレビューする。 */
-function CropPreview({
-  imageUrl,
-  cropRect,
-  maxWidth = 400,
-}: {
+export type CropPreviewProps = {
   imageUrl: string;
   cropRect: CropRect;
   maxWidth?: number;
-}) {
+};
+
+/** Canvas で指定領域を切り抜きプレビューする。 */
+export function CropPreview({
+  imageUrl,
+  cropRect,
+  maxWidth = 400,
+}: CropPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const renderIdRef = useRef(0);

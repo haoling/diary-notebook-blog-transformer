@@ -202,11 +202,12 @@ export class IndexManager {
     await this.persist();
   }
 
-  /** 記事エントリを追加する。 */
+  /** 記事エントリを追加する。同一 ID が既存の場合は置換（upsert）。 */
   async addArticle(entry: IndexArticleEntry): Promise<void> {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
+    this.index.articles = this.index.articles.filter((a) => a.id !== entry.id);
     this.index.articles.push(...this.cloneEntries([entry]));
     await this.persist();
   }
