@@ -1,6 +1,7 @@
 import { DriveClient } from "./drive-client";
 import { DriveNotFoundError } from "./drive-errors";
 import { IndexManager } from "./index-manager";
+import { deleteCachedPhotoThumbnail } from "./photo-cache";
 import type { PhotoObject } from "@/types/photo";
 import type { PhotoSourceType } from "@/types/settings";
 
@@ -360,6 +361,7 @@ export class PhotoImporter {
       await this.client.deleteFile(file.id);
     }
     await this.indexManager.removePhoto(id);
+    await deleteCachedPhotoThumbnail(id);
   }
 
   /** PhotoObject の cropRect などを更新して保存する。 */
