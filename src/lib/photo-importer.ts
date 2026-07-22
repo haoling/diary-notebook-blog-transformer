@@ -360,8 +360,11 @@ export class PhotoImporter {
     if (file) {
       await this.client.deleteFile(file.id);
     }
-    await this.indexManager.removePhoto(id);
-    await deleteCachedPhotoThumbnail(id);
+    try {
+      await this.indexManager.removePhoto(id);
+    } finally {
+      await deleteCachedPhotoThumbnail(id);
+    }
   }
 
   /** PhotoObject の cropRect などを更新して保存する。 */

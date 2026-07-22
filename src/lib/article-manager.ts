@@ -397,12 +397,20 @@ export function usePhotoThumbnails(
 
     // 一度取得したサムネイルは IndexedDB にキャッシュし、
     // Photos の baseUrl 期限切れや API 呼び出し回数を気にせず再利用する。
+    // Drive 由来は原寸ファイルをそのまま取得するため、キャッシュ対象は
+    // リサイズ済みサムネイルを扱う google_photos のみに限定する
+    // （さもないと大容量の原寸画像が IndexedDB に溜まってしまう）。
     async function resolve(photo: PhotoObject): Promise<string> {
-      const cached = await getCachedPhotoThumbnail(photo.id);
-      if (cached) return URL.createObjectURL(cached);
+      const cacheable = photo.sourceType === "google_photos";
+      if (cacheable) {
+        const cached = await getCachedPhotoThumbnail(photo.id);
+        if (cached) return URL.createObjectURL(cached);
+      }
 
       const blob = await fetchThumbnailBlob(photo);
-      setCachedPhotoThumbnail(photo.id, blob).catch(() => {});
+      if (cacheable) {
+        setCachedPhotoThumbnail(photo.id, blob).catch(() => {});
+      }
       return URL.createObjectURL(blob);
     }
 

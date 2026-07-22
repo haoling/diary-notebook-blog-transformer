@@ -18,13 +18,20 @@ function openDb(): Promise<IDBDatabase> {
     return Promise.reject(new Error("indexedDB is not available"));
   }
   if (!dbPromise) {
-    dbPromise = new Promise((resolve, reject) => {
+    dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
-        req.result.createObjectStore(STORE_NAME);
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME);
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
+    }).catch((err) => {
+      // 開けなかった場合は次回呼び出しでリトライできるようキャッシュをリセットする
+      dbPromise = null;
+      throw err;
     });
   }
   return dbPromise;
