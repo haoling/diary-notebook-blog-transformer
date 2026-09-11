@@ -35,21 +35,29 @@ function AuthedThumbnail({
 
   useEffect(() => {
     const controller = new AbortController();
-    setBlobUrl(null);
-    fetch(thumbnailLink, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: controller.signal,
-    })
-      .then((r) => (r.ok ? r.blob() : Promise.reject()))
-      .then((blob) => {
-        if (controller.signal.aborted) return;
-        const url = URL.createObjectURL(blob);
-        prevUrl.current = url;
-        setBlobUrl(url);
+
+    // データ取得に伴う setState は、effect 本体ではなく内側の関数の中で行うことで、
+    // cascading render の警告を避ける。
+    function loadThumbnail() {
+      setBlobUrl(null);
+      fetch(thumbnailLink, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
       })
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-      });
+        .then((r) => (r.ok ? r.blob() : Promise.reject()))
+        .then((blob) => {
+          if (controller.signal.aborted) return;
+          const url = URL.createObjectURL(blob);
+          prevUrl.current = url;
+          setBlobUrl(url);
+        })
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+        });
+    }
+
+    loadThumbnail();
+
     return () => {
       controller.abort();
       if (prevUrl.current) {
@@ -66,6 +74,8 @@ function AuthedThumbnail({
       </div>
     );
   }
+  // 認証付き fetch で作った blob: URL を表示するため next/image は使わない。
+  // eslint-disable-next-line @next/next/no-img-element
   return <img src={blobUrl} alt={alt} className={className} />;
 }
 

@@ -1,7 +1,35 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import type { PhotoObject, NormalizedCropRect } from "@/types/photo";
+
+type ImageMetrics = {
+  /** 画像の実サイズ。 */
+  naturalWidth: number;
+  naturalHeight: number;
+  /** コンテナの表示サイズ（object-cover 前提）。 */
+  containerWidth: number;
+  containerHeight: number;
+};
+
+/** 実画像正規化座標（0..1）を object-cover 前提でコンテナ相対（0..1）に変換する。 */
+function toContainerRect(
+  r: NormalizedCropRect,
+  { naturalWidth: nw, naturalHeight: nh, containerWidth: cw, containerHeight: ch }: ImageMetrics,
+): NormalizedCropRect {
+  const scale = Math.max(cw / nw, ch / nh);
+  const renderedW = nw * scale;
+  const renderedH = nh * scale;
+  const offsetX = (cw - renderedW) / 2;
+  const offsetY = (ch - renderedH) / 2;
+
+  return {
+    x: (r.x * nw * scale + offsetX) / cw,
+    y: (r.y * nh * scale + offsetY) / ch,
+    width: (r.width * nw * scale) / cw,
+    height: (r.height * nh * scale) / ch,
+  };
+}
 
 export type PhotoCardProps = {
   photo: PhotoObject;
@@ -43,6 +71,7 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
     photo.cropRect ?? null,
   );
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const [imgMetrics, setImgMetrics] = useState<ImageMetrics | null>(null);
 
   const sourceLabel =
     photo.sourceType === "google_photos" ? "Google Photos" : "Google Drive";
@@ -175,39 +204,48 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
     setCropState(INITIAL_CROP);
   };
 
-  /**
-   * オーバーレイ表示用の crop rect。
-   * ドラッグ中は cropState から計算、確定後は pendingCrop を使う。
-   * 座標は object-cover のコンテナ相対（0..1）に逆変換して表示する。
-   */
-  const toContainerRect = useCallback(
-    (r: NormalizedCropRect) => {
-      const img = imgRef.current;
-      const nw = img?.naturalWidth ?? 0;
-      const nh = img?.naturalHeight ?? 0;
-      const containerEl = img?.parentElement;
+  /** 画像の実サイズとコンテナの表示サイズを測定して state に反映する。 */
+  const measureImage = useCallback(() => {
+    const img = imgRef.current;
+    const containerEl = img?.parentElement;
+    if (!img || !containerEl || img.naturalWidth === 0 || img.naturalHeight === 0) {
+      setImgMetrics(null);
+      return;
+    }
+    const rect = containerEl.getBoundingClientRect();
+    setImgMetrics({
+      naturalWidth: img.naturalWidth,
+      naturalHeight: img.naturalHeight,
+      containerWidth: rect.width,
+      containerHeight: rect.height,
+    });
+  }, []);
 
-      if (!img || nw === 0 || nh === 0 || !containerEl) {
-        return r;
+  // 画像ロード後、既に読み込み済み（キャッシュ）の場合も測定する。
+  // コンテナのリサイズ（レイアウト変化・ウィンドウリサイズ等）にも追従する。
+  // thumbnailUrl が変わった（消えた場合も含む）直後は、以前の画像の metrics を
+  // 使い続けて crop 座標がずれないよう、まず無効化してから測定し直す。
+  useEffect(() => {
+    function invalidateMetrics() {
+      setImgMetrics(null);
+    }
+    invalidateMetrics();
+
+    const img = imgRef.current;
+    const containerEl = img?.parentElement;
+    if (!img || !containerEl) return;
+
+    if (img.complete) {
+      function measureAlreadyLoaded() {
+        measureImage();
       }
+      measureAlreadyLoaded();
+    }
 
-      const cw = containerEl.getBoundingClientRect().width;
-      const ch = containerEl.getBoundingClientRect().height;
-      const scale = Math.max(cw / nw, ch / nh);
-      const renderedW = nw * scale;
-      const renderedH = nh * scale;
-      const offsetX = (cw - renderedW) / 2;
-      const offsetY = (ch - renderedH) / 2;
-
-      return {
-        x: (r.x * nw * scale + offsetX) / cw,
-        y: (r.y * nh * scale + offsetY) / ch,
-        width: (r.width * nw * scale) / cw,
-        height: (r.height * nh * scale) / ch,
-      };
-    },
-    [],
-  );
+    const observer = new ResizeObserver(() => measureImage());
+    observer.observe(containerEl);
+    return () => observer.disconnect();
+  }, [thumbnailUrl, measureImage]);
 
   // cropState も pendingCrop も実画像正規化座標（0..1）なので、
   // ドラッグ中・確定後を問わず常に toContainerRect() でコンテナ相対に変換して描画する
@@ -220,7 +258,10 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
       }
     : pendingCrop;
 
-  const displayCrop = rawDisplayCrop ? toContainerRect(rawDisplayCrop) : null;
+  const displayCrop =
+    rawDisplayCrop && imgMetrics
+      ? toContainerRect(rawDisplayCrop, imgMetrics)
+      : rawDisplayCrop;
 
   return (
     <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex flex-col">
@@ -233,12 +274,16 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
         onPointerCancel={onPointerCancel}
       >
         {thumbnailUrl ? (
+          // crop UI の計測（naturalWidth/naturalHeight を ref 経由で参照）に生の img 要素が
+          // 必要なため next/image は使わない。
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             ref={imgRef}
             src={thumbnailUrl}
             alt={photo.title ?? "photo"}
             className="w-full h-full object-cover pointer-events-none"
             draggable={false}
+            onLoad={measureImage}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">

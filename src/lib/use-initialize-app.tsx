@@ -29,13 +29,13 @@ const InitializeAppContext = createContext<InitializeAppResult | null>(null);
 
 export function useInitializeApp(): InitializeAppResult {
   const ctx = useContext(InitializeAppContext);
-  if (ctx) return ctx;
-
-  // Context プロバイダ外で呼ばれた場合は従来通り独立インスタンスを返す
-  return useInitializeAppImpl();
+  // hook は条件付きで呼び出せないため常に呼び出し、Context プロバイダ配下では
+  // 独立インスタンス側の初期化処理自体をスキップする。
+  const standalone = useInitializeAppImpl(ctx !== null);
+  return ctx ?? standalone;
 }
 
-function useInitializeAppImpl(): InitializeAppResult {
+function useInitializeAppImpl(skip = false): InitializeAppResult {
   const { accessToken, isAuthenticated } = useAuth();
   const [status, setStatus] = useState<InitializeStatus>("loading");
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -73,14 +73,21 @@ function useInitializeAppImpl(): InitializeAppResult {
   );
 
   useEffect(() => {
+    if (skip) return;
+
     if (!isAuthenticated || !accessToken) {
-      setSettings(null);
-      setIndex(null);
-      setError(null);
-      setSettingsManager(null);
-      setIndexManager(null);
-      setSessionManager(null);
-      if (status !== "loading") setStatus("loading");
+      // 複数の setState をまとめてリセットする処理は、effect 本体ではなく
+      // 内側の関数の中で行うことで、cascading render の警告を避ける。
+      function resetForUnauthenticated() {
+        setSettings(null);
+        setIndex(null);
+        setError(null);
+        setSettingsManager(null);
+        setIndexManager(null);
+        setSessionManager(null);
+        if (status !== "loading") setStatus("loading");
+      }
+      resetForUnauthenticated();
       return;
     }
 
@@ -136,7 +143,7 @@ function useInitializeAppImpl(): InitializeAppResult {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, accessToken]);
+  }, [skip, isAuthenticated, accessToken]);
 
   // handleFolderSelected を settingsManager に束縛して返す
   const boundHandleFolderSelected = useCallback(

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { useAuth } from "@/lib/auth-context";
 import { ReAuthDialog } from "@/components/ReAuthDialog";
 
@@ -17,10 +18,14 @@ export function UserProfile() {
   const [remainingSec, setRemainingSec] = useState<number | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [snoozedUntil, setSnoozedUntil] = useState<number>(0);
+  const [snoozed, setSnoozed] = useState(false);
 
   useEffect(() => {
     if (tokenExpiresAt === null) {
-      setRemainingSec(null);
+      function clearRemaining() {
+        setRemainingSec(null);
+      }
+      clearRemaining();
       return;
     }
     // 実効期限（AuthProvider が自動ログアウトする時刻）基準でカウントダウン
@@ -37,12 +42,31 @@ export function UserProfile() {
     return () => clearTimeout(timerId);
   }, [tokenExpiresAt]);
 
+  // snoozed は「後で」を押したイベントハンドラ側で直ちに true にする（下記 onDismiss）。
+  // この effect は snoozedUntil の期限が来たら自動的に false へ戻すタイマーだけを管理する。
+  // render 中に Date.now() を呼ばないよう、期限切れの判定も effect 側で行う。
+  useEffect(() => {
+    if (snoozedUntil === 0) return;
+    const delay = snoozedUntil - Date.now();
+
+    if (delay <= 0) {
+      function clearExpiredSnooze() {
+        setSnoozed(false);
+      }
+      clearExpiredSnooze();
+      return;
+    }
+
+    const timerId = setTimeout(() => setSnoozed(false), delay);
+    return () => clearTimeout(timerId);
+  }, [snoozedUntil]);
+
   if (!user) return null;
 
   const showWarning =
     remainingSec !== null &&
     remainingSec <= WARNING_THRESHOLD_SEC &&
-    Date.now() >= snoozedUntil;
+    !snoozed;
 
   // AuthProvider は effectiveExpiresAt (= tokenExpiresAt - 60s) で clearAuth() を呼ぶため
   // remainingSec <= 0 直後に user が null になりバッジは消える。
@@ -77,9 +101,11 @@ export function UserProfile() {
             </span>
           </button>
         )}
-        <img
+        <Image
           src={user.picture}
           alt={user.name}
+          width={36}
+          height={36}
           className="h-9 w-9 rounded-full ring-2 ring-white shadow-sm"
           referrerPolicy="no-referrer"
         />
@@ -101,6 +127,7 @@ export function UserProfile() {
           }}
           onDismiss={() => {
             setDialogOpen(false);
+            setSnoozed(true);
             setSnoozedUntil(Date.now() + DISMISS_SNOOZE_MS);
           }}
         />
