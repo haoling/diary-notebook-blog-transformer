@@ -25,6 +25,10 @@ export type {
 /** ユーザー設定・インデックス関連の型。 */
 export type {
   Settings,
+  NotebookSizePreset,
+  LineHeightPreset,
+  NotebookCalibration,
+  NotebookProfile,
   IndexSessionEntry,
   PhotoSourceType,
   IndexPhotoEntry,
