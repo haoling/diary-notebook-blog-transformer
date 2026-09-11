@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { useAuth } from "@/lib/auth-context";
 import { ReAuthDialog } from "@/components/ReAuthDialog";
 
@@ -100,9 +101,11 @@ export function UserProfile() {
             </span>
           </button>
         )}
-        <img
+        <Image
           src={user.picture}
           alt={user.name}
+          width={36}
+          height={36}
           className="h-9 w-9 rounded-full ring-2 ring-white shadow-sm"
           referrerPolicy="no-referrer"
         />

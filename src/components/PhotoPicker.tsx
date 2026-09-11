@@ -74,6 +74,8 @@ function AuthedThumbnail({
       </div>
     );
   }
+  // 認証付き fetch で作った blob: URL を表示するため next/image は使わない。
+  // eslint-disable-next-line @next/next/no-img-element
   return <img src={blobUrl} alt={alt} className={className} />;
 }
 

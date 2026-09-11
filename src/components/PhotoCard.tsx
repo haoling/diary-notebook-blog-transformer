@@ -274,6 +274,9 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
         onPointerCancel={onPointerCancel}
       >
         {thumbnailUrl ? (
+          // crop UI の計測（naturalWidth/naturalHeight を ref 経由で参照）に生の img 要素が
+          // 必要なため next/image は使わない。
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             ref={imgRef}
             src={thumbnailUrl}
