@@ -77,7 +77,10 @@ export function useGooglePicker() {
     );
 
     if (existingScript) {
-      initPicker();
+      // 既にロード済みの場合の初期化呼び出しは、effect 本体ではなく内側の関数の中で行うことで、
+      // cascading render の警告を避ける。
+      function runInitPicker() { initPicker(); }
+      runInitPicker();
       const handleScriptEvent = () => { initPicker(); };
       existingScript.addEventListener("load", handleScriptEvent, { once: true });
       existingScript.addEventListener("error", handleScriptEvent, { once: true });

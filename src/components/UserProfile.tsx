@@ -17,10 +17,14 @@ export function UserProfile() {
   const [remainingSec, setRemainingSec] = useState<number | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [snoozedUntil, setSnoozedUntil] = useState<number>(0);
+  const [snoozed, setSnoozed] = useState(false);
 
   useEffect(() => {
     if (tokenExpiresAt === null) {
-      setRemainingSec(null);
+      function clearRemaining() {
+        setRemainingSec(null);
+      }
+      clearRemaining();
       return;
     }
     // 実効期限（AuthProvider が自動ログアウトする時刻）基準でカウントダウン
@@ -37,12 +41,28 @@ export function UserProfile() {
     return () => clearTimeout(timerId);
   }, [tokenExpiresAt]);
 
+  // 「後で」の間だけ snoozed を true にし、期限が来たら自動的に false へ戻す。
+  // render 中に Date.now() を呼ばないよう、判定は effect 側で行う。
+  useEffect(() => {
+    if (snoozedUntil === 0) return;
+    const delay = snoozedUntil - Date.now();
+    if (delay <= 0) return;
+
+    function activateSnooze() {
+      setSnoozed(true);
+    }
+    activateSnooze();
+
+    const timerId = setTimeout(() => setSnoozed(false), delay);
+    return () => clearTimeout(timerId);
+  }, [snoozedUntil]);
+
   if (!user) return null;
 
   const showWarning =
     remainingSec !== null &&
     remainingSec <= WARNING_THRESHOLD_SEC &&
-    Date.now() >= snoozedUntil;
+    !snoozed;
 
   // AuthProvider は effectiveExpiresAt (= tokenExpiresAt - 60s) で clearAuth() を呼ぶため
   // remainingSec <= 0 直後に user が null になりバッジは消える。

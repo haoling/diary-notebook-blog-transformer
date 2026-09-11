@@ -47,60 +47,67 @@ export function CropPreview({
   useEffect(() => {
     let cancelled = false;
     const renderId = ++renderIdRef.current;
-    setStatus("loading");
 
-    const img = new Image();
-    img.crossOrigin = "anonymous";
+    // データ取得（画像ロード）に伴う setState は、effect 本体ではなく
+    // 内側の関数の中で行うことで、cascading render の警告を避ける。
+    function loadAndDraw() {
+      setStatus("loading");
 
-    img.addEventListener("load", () => {
-      if (cancelled || renderId !== renderIdRef.current) return;
-      try {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+      const img = new Image();
+      img.crossOrigin = "anonymous";
 
-        const { x, y, width, height } = cropRect;
-        const availW = img.naturalWidth - x;
-        const availH = img.naturalHeight - y;
+      img.addEventListener("load", () => {
+        if (cancelled || renderId !== renderIdRef.current) return;
+        try {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
 
-        if (availW <= 0 || availH <= 0) {
+          const { x, y, width, height } = cropRect;
+          const availW = img.naturalWidth - x;
+          const availH = img.naturalHeight - y;
+
+          if (availW <= 0 || availH <= 0) {
+            setStatus("error");
+            return;
+          }
+
+          const srcW = Math.min(width, availW);
+          const srcH = Math.min(height, availH);
+
+          if (srcW < 1 || srcH < 1) {
+            setStatus("error");
+            return;
+          }
+
+          let drawW = srcW;
+          let drawH = srcH;
+          if (maxWidth && drawW > maxWidth) {
+            const scale = maxWidth / drawW;
+            drawW = maxWidth;
+            drawH = Math.round(drawH * scale);
+          }
+
+          canvas.width = drawW;
+          canvas.height = drawH;
+          const ctx = canvas.getContext("2d")!;
+          ctx.drawImage(img, x, y, srcW, srcH, 0, 0, drawW, drawH);
+
+          setStatus("ready");
+        } catch {
+          if (!cancelled) setStatus("error");
+        }
+      });
+
+      img.addEventListener("error", () => {
+        if (!cancelled && renderId === renderIdRef.current) {
           setStatus("error");
-          return;
         }
+      });
 
-        const srcW = Math.min(width, availW);
-        const srcH = Math.min(height, availH);
+      img.src = imageUrl;
+    }
 
-        if (srcW < 1 || srcH < 1) {
-          setStatus("error");
-          return;
-        }
-
-        let drawW = srcW;
-        let drawH = srcH;
-        if (maxWidth && drawW > maxWidth) {
-          const scale = maxWidth / drawW;
-          drawW = maxWidth;
-          drawH = Math.round(drawH * scale);
-        }
-
-        canvas.width = drawW;
-        canvas.height = drawH;
-        const ctx = canvas.getContext("2d")!;
-        ctx.drawImage(img, x, y, srcW, srcH, 0, 0, drawW, drawH);
-
-        setStatus("ready");
-      } catch {
-        if (!cancelled) setStatus("error");
-      }
-    });
-
-    img.addEventListener("error", () => {
-      if (!cancelled && renderId === renderIdRef.current) {
-        setStatus("error");
-      }
-    });
-
-    img.src = imageUrl;
+    loadAndDraw();
 
     return () => {
       cancelled = true;
