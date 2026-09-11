@@ -41,17 +41,20 @@ export function UserProfile() {
     return () => clearTimeout(timerId);
   }, [tokenExpiresAt]);
 
-  // 「後で」の間だけ snoozed を true にし、期限が来たら自動的に false へ戻す。
-  // render 中に Date.now() を呼ばないよう、判定は effect 側で行う。
+  // snoozed は「後で」を押したイベントハンドラ側で直ちに true にする（下記 onDismiss）。
+  // この effect は snoozedUntil の期限が来たら自動的に false へ戻すタイマーだけを管理する。
+  // render 中に Date.now() を呼ばないよう、期限切れの判定も effect 側で行う。
   useEffect(() => {
     if (snoozedUntil === 0) return;
     const delay = snoozedUntil - Date.now();
-    if (delay <= 0) return;
 
-    function activateSnooze() {
-      setSnoozed(true);
+    if (delay <= 0) {
+      function clearExpiredSnooze() {
+        setSnoozed(false);
+      }
+      clearExpiredSnooze();
+      return;
     }
-    activateSnooze();
 
     const timerId = setTimeout(() => setSnoozed(false), delay);
     return () => clearTimeout(timerId);
@@ -121,6 +124,7 @@ export function UserProfile() {
           }}
           onDismiss={() => {
             setDialogOpen(false);
+            setSnoozed(true);
             setSnoozedUntil(Date.now() + DISMISS_SNOOZE_MS);
           }}
         />

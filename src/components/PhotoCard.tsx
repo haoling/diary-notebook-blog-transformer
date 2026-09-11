@@ -223,7 +223,14 @@ export function PhotoCard({ photo, thumbnailUrl, onDelete, onCropChange }: Photo
 
   // 画像ロード後、既に読み込み済み（キャッシュ）の場合も測定する。
   // コンテナのリサイズ（レイアウト変化・ウィンドウリサイズ等）にも追従する。
+  // thumbnailUrl が変わった（消えた場合も含む）直後は、以前の画像の metrics を
+  // 使い続けて crop 座標がずれないよう、まず無効化してから測定し直す。
   useEffect(() => {
+    function invalidateMetrics() {
+      setImgMetrics(null);
+    }
+    invalidateMetrics();
+
     const img = imgRef.current;
     const containerEl = img?.parentElement;
     if (!img || !containerEl) return;
