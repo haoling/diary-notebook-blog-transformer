@@ -1,8 +1,34 @@
+/** 手帳のサイズプリセット。 */
+export type NotebookSizePreset = "mini6ring" | "bible" | "a5" | "b6" | "custom";
+
+/** 罫線の行高プリセット。 */
+export type LineHeightPreset = "6mm" | "7mm" | "8mm" | "custom";
+
+/** 手帳のキャリブレーション結果。 */
+export type NotebookCalibration = {
+  calibratedAt: string;
+  lineYRatios: number[];
+  sourceImageHeightPx: number;
+  sourceImageWidthPx?: number;
+  referenceColor: { r: number; g: number; b: number };
+};
+
+/** 手帳プロファイル。 */
+export type NotebookProfile = {
+  sizePreset: NotebookSizePreset;
+  pageWidthMm: number;
+  pageHeightMm: number;
+  lineHeightPreset: LineHeightPreset;
+  lineHeightMm: number;
+  calibration?: NotebookCalibration;
+};
+
 /** アプリのユーザー設定。appDataFolder に保存される。 */
 export type Settings = {
   visionApiKey?: string;
   notebookImageFolderId?: string;
   notebookImageFolderName?: string;
+  notebookProfile?: NotebookProfile;
   /** 永続化ごとにインクリメントされるバージョン番号。 */
   version?: number;
 };
