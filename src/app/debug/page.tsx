@@ -10,7 +10,13 @@ import { IndexManager } from "@/lib/index-manager";
 import { useInitializeApp } from "@/lib/use-initialize-app";
 import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { NOTEBOOK_SIZE_PRESETS, LINE_HEIGHT_PRESETS } from "@/lib/notebook-presets";
-import type { Settings, AppIndex } from "@/types/settings";
+import type {
+  Settings,
+  AppIndex,
+  NotebookSizePreset,
+  LineHeightPreset,
+  NotebookCalibration,
+} from "@/types/settings";
 
 type FileEntry = {
   file: DriveFile;
@@ -54,6 +60,18 @@ export default function DebugPage() {
   const [folderIdInput, setFolderIdInput] = useState("");
   const [folderNameInput, setFolderNameInput] = useState("");
   const [smUpdateJson, setSmUpdateJson] = useState("{}");
+  const [npSizePreset, setNpSizePreset] = useState<NotebookSizePreset>("a5");
+  const [npPageWidthMm, setNpPageWidthMm] = useState(String(NOTEBOOK_SIZE_PRESETS.a5.widthMm));
+  const [npPageHeightMm, setNpPageHeightMm] = useState(String(NOTEBOOK_SIZE_PRESETS.a5.heightMm));
+  const [npLineHeightPreset, setNpLineHeightPreset] = useState<LineHeightPreset>("6mm");
+  const [npLineHeightMm, setNpLineHeightMm] = useState(String(LINE_HEIGHT_PRESETS["6mm"]));
+  const [ncCalibratedAt, setNcCalibratedAt] = useState("");
+  const [ncLineYRatios, setNcLineYRatios] = useState("0.1,0.2,0.3");
+  const [ncSourceHeightPx, setNcSourceHeightPx] = useState("1000");
+  const [ncSourceWidthPx, setNcSourceWidthPx] = useState("");
+  const [ncColorR, setNcColorR] = useState("255");
+  const [ncColorG, setNcColorG] = useState("255");
+  const [ncColorB, setNcColorB] = useState("255");
 
   // IndexManager テスト
   const imRef = useRef<IndexManager | null>(null);
@@ -192,6 +210,95 @@ export default function DebugPage() {
       addLog(setSmLogs, `setNotebookImageFolderName() エラー: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
   }, [smLoaded, folderNameInput, addLog]);
+
+  const handleNpSizePresetChange = useCallback((preset: NotebookSizePreset) => {
+    setNpSizePreset(preset);
+    if (preset !== "custom") {
+      const def = NOTEBOOK_SIZE_PRESETS[preset];
+      setNpPageWidthMm(String(def.widthMm));
+      setNpPageHeightMm(String(def.heightMm));
+    }
+  }, []);
+
+  const handleNpLineHeightPresetChange = useCallback((preset: LineHeightPreset) => {
+    setNpLineHeightPreset(preset);
+    if (preset !== "custom") {
+      setNpLineHeightMm(String(LINE_HEIGHT_PRESETS[preset]));
+    }
+  }, []);
+
+  const handleSmGetNotebookProfile = useCallback(() => {
+    const sm = smRef.current;
+    if (!sm || !smLoaded) return;
+    const profile = sm.getNotebookProfile();
+    addLog(setSmLogs, `getNotebookProfile() → ${profile ? JSON.stringify(profile) : "(undefined)"}`, "info");
+  }, [smLoaded, addLog]);
+
+  const handleSmSetNotebookProfile = useCallback(async () => {
+    const sm = smRef.current;
+    if (!sm || !smLoaded) return;
+    try {
+      const profile = {
+        sizePreset: npSizePreset,
+        pageWidthMm: Number(npPageWidthMm),
+        pageHeightMm: Number(npPageHeightMm),
+        lineHeightPreset: npLineHeightPreset,
+        lineHeightMm: Number(npLineHeightMm),
+      };
+      await sm.setNotebookProfile(profile);
+      setSmData(sm.getAll());
+      addLog(setSmLogs, `setNotebookProfile(${JSON.stringify(profile)})`, "success");
+    } catch (err) {
+      addLog(setSmLogs, `setNotebookProfile() エラー: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  }, [smLoaded, npSizePreset, npPageWidthMm, npPageHeightMm, npLineHeightPreset, npLineHeightMm, addLog]);
+
+  const handleSmClearNotebookProfile = useCallback(async () => {
+    const sm = smRef.current;
+    if (!sm || !smLoaded) return;
+    try {
+      await sm.setNotebookProfile(undefined);
+      setSmData(sm.getAll());
+      addLog(setSmLogs, "setNotebookProfile(undefined)", "success");
+    } catch (err) {
+      addLog(setSmLogs, `setNotebookProfile(undefined) エラー: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  }, [smLoaded, addLog]);
+
+  const handleSmSetNotebookCalibration = useCallback(async () => {
+    const sm = smRef.current;
+    if (!sm || !smLoaded) return;
+    try {
+      const lineYRatios = ncLineYRatios
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => !Number.isNaN(n));
+      const calibration: NotebookCalibration = {
+        calibratedAt: ncCalibratedAt || new Date().toISOString(),
+        lineYRatios,
+        sourceImageHeightPx: Number(ncSourceHeightPx),
+        sourceImageWidthPx: ncSourceWidthPx ? Number(ncSourceWidthPx) : undefined,
+        referenceColor: { r: Number(ncColorR), g: Number(ncColorG), b: Number(ncColorB) },
+      };
+      await sm.setNotebookCalibration(calibration);
+      setSmData(sm.getAll());
+      addLog(setSmLogs, `setNotebookCalibration(${JSON.stringify(calibration)})`, "success");
+    } catch (err) {
+      addLog(setSmLogs, `setNotebookCalibration() エラー: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  }, [smLoaded, ncCalibratedAt, ncLineYRatios, ncSourceHeightPx, ncSourceWidthPx, ncColorR, ncColorG, ncColorB, addLog]);
+
+  const handleSmClearNotebookCalibration = useCallback(async () => {
+    const sm = smRef.current;
+    if (!sm || !smLoaded) return;
+    try {
+      await sm.setNotebookCalibration(undefined);
+      setSmData(sm.getAll());
+      addLog(setSmLogs, "setNotebookCalibration(undefined)", "success");
+    } catch (err) {
+      addLog(setSmLogs, `setNotebookCalibration(undefined) エラー: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  }, [smLoaded, addLog]);
 
   const handleSmUpdate = useCallback(async () => {
     const sm = smRef.current;
@@ -767,6 +874,114 @@ export default function DebugPage() {
                     <button onClick={handleSmSetFolderName} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">設定</button>
                   </div>
                 </div>
+                {/* notebookProfile */}
+                <div className="space-y-2 border-t border-purple-100 pt-3">
+                  <div className="text-xs font-medium text-slate-500">
+                    notebookProfile — サイズ・行高さ（setNotebookProfile は既存の calibration を保持する）
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={npSizePreset}
+                      onChange={(e) => handleNpSizePresetChange(e.target.value as NotebookSizePreset)}
+                      className="px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    >
+                      {(Object.keys(NOTEBOOK_SIZE_PRESETS) as Array<keyof typeof NOTEBOOK_SIZE_PRESETS>).map((key) => (
+                        <option key={key} value={key}>{key} - {NOTEBOOK_SIZE_PRESETS[key].label}</option>
+                      ))}
+                      <option value="custom">custom</option>
+                    </select>
+                    <input
+                      type="number"
+                      value={npPageWidthMm}
+                      onChange={(e) => setNpPageWidthMm(e.target.value)}
+                      placeholder="pageWidthMm"
+                      className="w-28 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                    <input
+                      type="number"
+                      value={npPageHeightMm}
+                      onChange={(e) => setNpPageHeightMm(e.target.value)}
+                      placeholder="pageHeightMm"
+                      className="w-28 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                    <select
+                      value={npLineHeightPreset}
+                      onChange={(e) => handleNpLineHeightPresetChange(e.target.value as LineHeightPreset)}
+                      className="px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    >
+                      {(Object.keys(LINE_HEIGHT_PRESETS) as Array<keyof typeof LINE_HEIGHT_PRESETS>).map((key) => (
+                        <option key={key} value={key}>{key}</option>
+                      ))}
+                      <option value="custom">custom</option>
+                    </select>
+                    <input
+                      type="number"
+                      value={npLineHeightMm}
+                      onChange={(e) => setNpLineHeightMm(e.target.value)}
+                      placeholder="lineHeightMm"
+                      className="w-28 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={handleSmGetNotebookProfile} className="px-3 py-1.5 text-xs bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition">getNotebookProfile()</button>
+                    <button onClick={handleSmSetNotebookProfile} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">setNotebookProfile()</button>
+                    <button onClick={handleSmClearNotebookProfile} className="px-3 py-1.5 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition">setNotebookProfile(undefined)</button>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    設定後は「🔄 再初期化」（load() のやり直し）またはブラウザの再読み込みで、getNotebookProfile() の結果が保持されているか確認できます。
+                  </p>
+                </div>
+
+                {/* notebookProfile.calibration */}
+                <div className="space-y-2 border-t border-purple-100 pt-3">
+                  <div className="text-xs font-medium text-slate-500">
+                    notebookProfile.calibration — setNotebookCalibration はプロファイル未設定だとエラーになる
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      value={ncCalibratedAt}
+                      onChange={(e) => setNcCalibratedAt(e.target.value)}
+                      placeholder="calibratedAt（空欄で現在時刻）"
+                      className="w-56 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                    <input
+                      type="text"
+                      value={ncLineYRatios}
+                      onChange={(e) => setNcLineYRatios(e.target.value)}
+                      placeholder="lineYRatios（カンマ区切り）"
+                      className="w-48 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                    <input
+                      type="number"
+                      value={ncSourceHeightPx}
+                      onChange={(e) => setNcSourceHeightPx(e.target.value)}
+                      placeholder="sourceImageHeightPx"
+                      className="w-36 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                    <input
+                      type="number"
+                      value={ncSourceWidthPx}
+                      onChange={(e) => setNcSourceWidthPx(e.target.value)}
+                      placeholder="sourceImageWidthPx（任意）"
+                      className="w-40 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-slate-400">referenceColor</span>
+                      <input type="number" min={0} max={255} value={ncColorR} onChange={(e) => setNcColorR(e.target.value)} placeholder="r" className="w-14 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                      <input type="number" min={0} max={255} value={ncColorG} onChange={(e) => setNcColorG(e.target.value)} placeholder="g" className="w-14 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                      <input type="number" min={0} max={255} value={ncColorB} onChange={(e) => setNcColorB(e.target.value)} placeholder="b" className="w-14 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={handleSmSetNotebookCalibration} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">setNotebookCalibration()</button>
+                    <button onClick={handleSmClearNotebookCalibration} className="px-3 py-1.5 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition">setNotebookCalibration(undefined)</button>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    notebookProfile を先に「setNotebookProfile(undefined)」でクリアしてからこのボタンを押すと、エラーになることを確認できます。
+                  </p>
+                </div>
+
                 {/* update() 一括更新 */}
                 <div className="space-y-1 border-t border-purple-100 pt-3">
                   <div className="text-xs font-medium text-slate-500">update() — JSON で一括更新</div>
@@ -783,7 +998,7 @@ export default function DebugPage() {
             )}
 
             {smLogs.length > 0 && (
-              <details className="text-xs">
+              <details className="text-xs" open>
                 <summary className="cursor-pointer text-slate-500 hover:text-slate-700">操作ログ ({smLogs.length})</summary>
                 <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
                   {smLogs.map((log, i) => (
