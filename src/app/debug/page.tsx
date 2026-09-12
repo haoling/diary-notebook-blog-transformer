@@ -9,6 +9,7 @@ import { SettingsManager } from "@/lib/settings-manager";
 import { IndexManager } from "@/lib/index-manager";
 import { useInitializeApp } from "@/lib/use-initialize-app";
 import { FolderPickerDialog } from "@/components/folder-picker-dialog";
+import { NOTEBOOK_SIZE_PRESETS, LINE_HEIGHT_PRESETS } from "@/lib/notebook-presets";
 import type { Settings, AppIndex } from "@/types/settings";
 
 type FileEntry = {
@@ -654,6 +655,32 @@ export default function DebugPage() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* notebook-presets 確認 */}
+        <div className="mt-8 bg-white rounded-2xl shadow-sm border border-teal-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-teal-100 bg-teal-50">
+            <h2 className="font-semibold text-teal-700">
+              📐 notebook-presets 確認
+            </h2>
+          </div>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-600">
+              NOTEBOOK_SIZE_PRESETS / LINE_HEIGHT_PRESETS の内容確認用（一時的な表示）。
+            </p>
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-slate-500">NOTEBOOK_SIZE_PRESETS</div>
+              <pre className="text-xs text-slate-700 bg-teal-50 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words font-mono">
+                {JSON.stringify(NOTEBOOK_SIZE_PRESETS, null, 2)}
+              </pre>
+            </div>
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-slate-500">LINE_HEIGHT_PRESETS</div>
+              <pre className="text-xs text-slate-700 bg-teal-50 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words font-mono">
+                {JSON.stringify(LINE_HEIGHT_PRESETS, null, 2)}
+              </pre>
             </div>
           </div>
         </div>
