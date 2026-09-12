@@ -136,8 +136,31 @@ export class SettingsManager {
     await this.persist();
   }
 
+  private cloneNotebookCalibration(
+    calibration: NotebookCalibration,
+  ): NotebookCalibration {
+    if (typeof structuredClone === "function") {
+      return structuredClone(calibration);
+    }
+    return {
+      ...calibration,
+      lineYRatios: [...calibration.lineYRatios],
+      referenceColor: { ...calibration.referenceColor },
+    };
+  }
+
+  private cloneNotebookProfile(profile: NotebookProfile): NotebookProfile {
+    return {
+      ...profile,
+      calibration: profile.calibration
+        ? this.cloneNotebookCalibration(profile.calibration)
+        : undefined,
+    };
+  }
+
   getNotebookProfile(): NotebookProfile | undefined {
-    return this.settings?.notebookProfile;
+    const profile = this.settings?.notebookProfile;
+    return profile ? this.cloneNotebookProfile(profile) : undefined;
   }
 
   /** サイズ・行高さを更新する。既存の calibration は保持する。 */
@@ -151,7 +174,12 @@ export class SettingsManager {
       this.settings.notebookProfile = undefined;
     } else {
       const calibration = this.settings.notebookProfile?.calibration;
-      this.settings.notebookProfile = { ...profile, calibration };
+      this.settings.notebookProfile = {
+        ...profile,
+        calibration: calibration
+          ? this.cloneNotebookCalibration(calibration)
+          : undefined,
+      };
     }
     await this.persist();
   }
@@ -170,7 +198,9 @@ export class SettingsManager {
     }
     this.settings.notebookProfile = {
       ...this.settings.notebookProfile,
-      calibration,
+      calibration: calibration
+        ? this.cloneNotebookCalibration(calibration)
+        : undefined,
     };
     await this.persist();
   }
