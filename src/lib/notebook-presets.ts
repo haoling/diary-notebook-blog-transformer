@@ -7,7 +7,7 @@ type SizePresetKey = Exclude<NotebookSizePreset, "custom">;
 type LineHeightPresetKey = Exclude<LineHeightPreset, "custom">;
 
 /** 手帳のサイズプリセット定義。 */
-export type NotebookSizePresetDefinition = {
+type NotebookSizePresetDefinition = {
   label: string;
   widthMm: number;
   heightMm: number;
