@@ -998,7 +998,7 @@ export default function DebugPage() {
             )}
 
             {smLogs.length > 0 && (
-              <details className="text-xs">
+              <details className="text-xs" open>
                 <summary className="cursor-pointer text-slate-500 hover:text-slate-700">操作ログ ({smLogs.length})</summary>
                 <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
                   {smLogs.map((log, i) => (
