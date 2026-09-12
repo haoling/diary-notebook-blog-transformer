@@ -1,6 +1,6 @@
 import { DriveClient } from "./drive-client";
 import { DriveNotFoundError } from "./drive-errors";
-import type { Settings } from "@/types/settings";
+import type { NotebookCalibration, NotebookProfile, Settings } from "@/types/settings";
 
 const SETTINGS_FILE_NAME = "settings.json";
 
@@ -133,6 +133,45 @@ export class SettingsManager {
       throw new Error("SettingsManager: load() を先に呼び出してください。");
     }
     this.settings.notebookImageFolderName = name;
+    await this.persist();
+  }
+
+  getNotebookProfile(): NotebookProfile | undefined {
+    return this.settings?.notebookProfile;
+  }
+
+  /** サイズ・行高さを更新する。既存の calibration は保持する。 */
+  async setNotebookProfile(
+    profile: Omit<NotebookProfile, "calibration"> | undefined,
+  ): Promise<void> {
+    if (!this.settings) {
+      throw new Error("SettingsManager: load() を先に呼び出してください。");
+    }
+    if (profile === undefined) {
+      this.settings.notebookProfile = undefined;
+    } else {
+      const calibration = this.settings.notebookProfile?.calibration;
+      this.settings.notebookProfile = { ...profile, calibration };
+    }
+    await this.persist();
+  }
+
+  /** キャリブレーション結果のみ更新する。プロファイル未設定ならエラーを投げる。 */
+  async setNotebookCalibration(
+    calibration: NotebookCalibration | undefined,
+  ): Promise<void> {
+    if (!this.settings) {
+      throw new Error("SettingsManager: load() を先に呼び出してください。");
+    }
+    if (!this.settings.notebookProfile) {
+      throw new Error(
+        "SettingsManager: notebookProfile が未設定です。先に setNotebookProfile() を呼び出してください。",
+      );
+    }
+    this.settings.notebookProfile = {
+      ...this.settings.notebookProfile,
+      calibration,
+    };
     await this.persist();
   }
 
