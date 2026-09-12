@@ -29,6 +29,7 @@ export type CorrectionResult = {
   adjustments?: {
     brightness?: number;
     contrast?: number;
+    saturation?: number;
     sharpness?: number;
     backgroundRemoval?: boolean; // 地色除去（背景を白に）
   };
