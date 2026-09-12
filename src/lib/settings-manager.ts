@@ -32,7 +32,7 @@ export class SettingsManager {
       const { _fileId: _, _file: __, version, ...rest } = result;
       this.settings = rest;
       this._version = version ?? 0;
-      return { ...this.settings, version: this._version };
+      return { ...this.snapshotSettings(this.settings), version: this._version };
     } catch (err) {
       if (err instanceof DriveNotFoundError) {
         const defaults: Settings = {};
@@ -43,7 +43,7 @@ export class SettingsManager {
         this._fileId = file.id;
         this.settings = defaults;
         this._version = 1;
-        return { ...this.settings, version: this._version };
+        return { ...this.snapshotSettings(this.settings), version: this._version };
       }
       throw err;
     }
@@ -97,7 +97,7 @@ export class SettingsManager {
     if (!this.settings) {
       throw new Error("SettingsManager: load() を先に呼び出してください。");
     }
-    return { ...this.settings, version: this._version };
+    return { ...this.snapshotSettings(this.settings), version: this._version };
   }
 
   getVisionApiKey(): string | undefined {
@@ -158,6 +158,19 @@ export class SettingsManager {
     };
   }
 
+  /**
+   * 設定のスナップショットを返す。notebookProfile（とネストした calibration）を複製し、
+   * 呼び出し側での変更が persist() を経由せず内部状態に混入しないようにする。
+   */
+  private snapshotSettings(settings: Settings): Settings {
+    return {
+      ...settings,
+      notebookProfile: settings.notebookProfile
+        ? this.cloneNotebookProfile(settings.notebookProfile)
+        : undefined,
+    };
+  }
+
   getNotebookProfile(): NotebookProfile | undefined {
     const profile = this.settings?.notebookProfile;
     return profile ? this.cloneNotebookProfile(profile) : undefined;
@@ -210,7 +223,12 @@ export class SettingsManager {
     if (!this.settings) {
       throw new Error("SettingsManager: load() を先に呼び出してください。");
     }
-    this.settings = { ...this.settings, ...partial };
+    const notebookProfile = "notebookProfile" in partial
+      ? partial.notebookProfile
+        ? this.cloneNotebookProfile(partial.notebookProfile)
+        : undefined
+      : this.settings.notebookProfile;
+    this.settings = { ...this.settings, ...partial, notebookProfile };
     await this.persist();
   }
 }
