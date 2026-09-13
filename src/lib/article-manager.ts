@@ -6,6 +6,7 @@ import { DriveNotFoundError } from "./drive-errors";
 import { IndexManager } from "./index-manager";
 import { applyCorrections } from "./image-processing";
 import { PhotoImporter } from "./photo-importer";
+import { getCachedPhotoThumbnail, setCachedPhotoThumbnail } from "./photo-cache";
 import type { Article, ArticleBlock } from "@/types/article";
 import type { ScanPage, ScanSession, ParagraphObject } from "@/types/scan";
 import type { PhotoObject } from "@/types/photo";
@@ -385,14 +386,31 @@ export function usePhotoThumbnails(
     if (!client || !photoImporter) return;
     let cancelled = false;
 
-    async function resolve(photo: PhotoObject): Promise<string> {
+    async function fetchThumbnailBlob(photo: PhotoObject): Promise<Blob> {
       if (photo.sourceType === "google_drive") {
-        const blob = await client!.getFileBlob(photo.sourceRef);
-        return URL.createObjectURL(blob);
+        return client!.getFileBlob(photo.sourceRef);
       }
       const item = await photoImporter!.getMediaItem(photo.sourceRef);
       const url = PhotoImporter.getThumbnailUrl(item.mediaFile.baseUrl, 256, 256);
-      const blob = await photoImporter!.fetchDriveThumbnailBlob(url);
+      return photoImporter!.fetchDriveThumbnailBlob(url);
+    }
+
+    // 一度取得したサムネイルは IndexedDB にキャッシュし、
+    // Photos の baseUrl 期限切れや API 呼び出し回数を気にせず再利用する。
+    // Drive 由来は原寸ファイルをそのまま取得するため、キャッシュ対象は
+    // リサイズ済みサムネイルを扱う google_photos のみに限定する
+    // （さもないと大容量の原寸画像が IndexedDB に溜まってしまう）。
+    async function resolve(photo: PhotoObject): Promise<string> {
+      const cacheable = photo.sourceType === "google_photos";
+      if (cacheable) {
+        const cached = await getCachedPhotoThumbnail(photo.id);
+        if (cached) return URL.createObjectURL(cached);
+      }
+
+      const blob = await fetchThumbnailBlob(photo);
+      if (cacheable) {
+        setCachedPhotoThumbnail(photo.id, blob).catch(() => {});
+      }
       return URL.createObjectURL(blob);
     }
 
