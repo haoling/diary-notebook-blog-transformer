@@ -10,6 +10,11 @@ import { IndexManager } from "@/lib/index-manager";
 import { useInitializeApp } from "@/lib/use-initialize-app";
 import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { NOTEBOOK_SIZE_PRESETS, LINE_HEIGHT_PRESETS } from "@/lib/notebook-presets";
+import {
+  computeExpectedPitchPx,
+  pixelYsToLineYRatios,
+  lineYRatiosToPixelYs,
+} from "@/lib/notebook-calibration";
 import type {
   Settings,
   AppIndex,
@@ -72,6 +77,13 @@ export default function DebugPage() {
   const [ncColorR, setNcColorR] = useState("255");
   const [ncColorG, setNcColorG] = useState("255");
   const [ncColorB, setNcColorB] = useState("255");
+
+  // notebook-calibration 変換関数テスト
+  const [ccImageHeightPx, setCcImageHeightPx] = useState("1000");
+  const [ccPageHeightMm, setCcPageHeightMm] = useState("91");
+  const [ccLineHeightMm, setCcLineHeightMm] = useState("7");
+  const [ccLineYsInput, setCcLineYsInput] = useState("100,200,300");
+  const [ccRatiosInput, setCcRatiosInput] = useState("0.1,0.2,0.3");
 
   // IndexManager テスト
   const imRef = useRef<IndexManager | null>(null);
@@ -226,6 +238,33 @@ export default function DebugPage() {
       setNpLineHeightMm(String(LINE_HEIGHT_PRESETS[preset]));
     }
   }, []);
+
+  // --- notebook-calibration 変換関数の計算結果 ---
+  const ccExpectedPitchPx = (() => {
+    const imageHeightPx = Number(ccImageHeightPx);
+    const pageHeightMm = Number(ccPageHeightMm);
+    const lineHeightMm = Number(ccLineHeightMm);
+    if (![imageHeightPx, pageHeightMm, lineHeightMm].every(Number.isFinite)) return null;
+    return computeExpectedPitchPx(imageHeightPx, {
+      sizePreset: "custom",
+      pageWidthMm: 0,
+      pageHeightMm,
+      lineHeightPreset: "custom",
+      lineHeightMm,
+    });
+  })();
+
+  const ccParsedLineYs = ccLineYsInput
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => !Number.isNaN(n));
+  const ccLineYRatios = pixelYsToLineYRatios(ccParsedLineYs, Number(ccImageHeightPx) || 0);
+
+  const ccParsedRatios = ccRatiosInput
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => !Number.isNaN(n));
+  const ccPixelYs = lineYRatiosToPixelYs(ccParsedRatios, Number(ccImageHeightPx) || 0);
 
   const handleSmGetNotebookProfile = useCallback(() => {
     const sm = smRef.current;
@@ -788,6 +827,78 @@ export default function DebugPage() {
               <pre className="text-xs text-slate-700 bg-teal-50 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap break-words font-mono">
                 {JSON.stringify(LINE_HEIGHT_PRESETS, null, 2)}
               </pre>
+            </div>
+          </div>
+        </div>
+
+        {/* notebook-calibration 変換関数テスト */}
+        <div className="mt-8 bg-white rounded-2xl shadow-sm border border-indigo-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-indigo-100 bg-indigo-50">
+            <h2 className="font-semibold text-indigo-700">
+              📏 notebook-calibration 変換関数テスト
+            </h2>
+          </div>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-600">
+              computeExpectedPitchPx / pixelYsToLineYRatios / lineYRatiosToPixelYs の動作確認用（一時的な表示）。
+            </p>
+
+            {/* computeExpectedPitchPx */}
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-slate-500">computeExpectedPitchPx(imageHeightPx, profile)</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="number" value={ccImageHeightPx} onChange={(e) => setCcImageHeightPx(e.target.value)} placeholder="imageHeightPx" className="w-40 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                <input type="number" value={ccPageHeightMm} onChange={(e) => setCcPageHeightMm(e.target.value)} placeholder="pageHeightMm" className="w-36 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                <input type="number" value={ccLineHeightMm} onChange={(e) => setCcLineHeightMm(e.target.value)} placeholder="lineHeightMm" className="w-36 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+              </div>
+              <div className="text-sm text-slate-700 bg-indigo-50 rounded-lg px-3 py-2 font-mono">
+                → {ccExpectedPitchPx === null ? "(入力エラー)" : ccExpectedPitchPx.toFixed(4)} px
+              </div>
+              <p className="text-xs text-slate-400">
+                既定値（imageHeightPx=1000, pageHeightMm=91, lineHeightMm=7）では約 76.9 px になるはず。
+              </p>
+            </div>
+
+            {/* pixelYsToLineYRatios / lineYRatiosToPixelYs */}
+            <div className="space-y-2 border-t border-indigo-100 pt-3">
+              <div className="text-xs font-medium text-slate-500">
+                pixelYsToLineYRatios(lineYs, imageHeightPx) ⇔ lineYRatiosToPixelYs(lineYRatios, imageHeightPx)
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={ccLineYsInput}
+                  onChange={(e) => setCcLineYsInput(e.target.value)}
+                  placeholder="lineYs（px、カンマ区切り）"
+                  className="w-64 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+                <span className="text-xs text-slate-400">imageHeightPx は上の値を共用</span>
+              </div>
+              <div className="text-sm text-slate-700 bg-indigo-50 rounded-lg px-3 py-2 font-mono break-words">
+                → lineYRatios: [{ccLineYRatios.map((r) => r.toFixed(4)).join(", ")}]
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={ccRatiosInput}
+                  onChange={(e) => setCcRatiosInput(e.target.value)}
+                  placeholder="lineYRatios（0..1、カンマ区切り）"
+                  className="w-64 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+                <button
+                  onClick={() => setCcRatiosInput(ccLineYRatios.join(","))}
+                  className="px-3 py-1.5 text-xs bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition"
+                >
+                  ↑ 上の結果を入力する（可逆性の確認）
+                </button>
+              </div>
+              <div className="text-sm text-slate-700 bg-indigo-50 rounded-lg px-3 py-2 font-mono break-words">
+                → pixelYs: [{ccPixelYs.map((y) => y.toFixed(4)).join(", ")}]
+              </div>
+              <p className="text-xs text-slate-400">
+                lineYs → lineYRatios → pixelYs と変換して、元の lineYs（昇順ソート済み）と一致することを確認できる。
+              </p>
             </div>
           </div>
         </div>
