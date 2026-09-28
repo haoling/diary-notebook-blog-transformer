@@ -489,8 +489,10 @@ export type ColorMatchAdjustments = {
   saturation: number;
 };
 
-/** インクの暗部を代表する輝度パーセンタイル */
-const INK_PERCENTILE = 0.02;
+/** インクの暗部を代表する輝度パーセンタイル（インクの少ないページでも紙の画素を拾わない程度に低くする） */
+const INK_PERCENTILE = 0.005;
+/** 暗部と地色の輝度差がこれ未満なら、インクが写っていないとみなしてコントラストを増強しない */
+const MIN_INK_RANGE = 16;
 /** 補正後に確保したい暗部の輝度（地色との差がダイナミックレンジの目標になる） */
 const TARGET_INK_LUMINANCE = 40;
 /** これ未満の彩度（RGB 最大最小差）は無彩色のノイズとみなし、彩度補正を行わない */
@@ -530,9 +532,9 @@ function factorToAdjustment(factor: number): number {
  *
  * 補正は CSS filter の brightness → contrast → saturate の順で適用される前提で算出する。
  * - 明るさ: 地色の輝度が参照色の輝度になるよう倍率を決める
- * - コントラスト: インク暗部（輝度 2 パーセンタイル）から地色までのダイナミックレンジが
- *   目標に満たない場合のみ増強する（減弱はしない）
- * - 彩度: 補正後の地色の彩度（RGB 最大最小差）が参照色の彩度になるよう倍率を決める
+ * - コントラスト: インク暗部（輝度 0.5 パーセンタイル）から地色までのダイナミックレンジが
+ *   目標に満たない場合のみ増強する（減弱はしない。インクが写っていない場合は増強しない）
+ * - 彩度: saturate のクリップを含めて、補正後の地色の彩度（RGB 最大最小差）が参照色の彩度になるよう倍率を決める
  */
 export function analyzeColorMatchAdjustments(
   source: RuledLineSource,
@@ -574,7 +576,7 @@ export function computeColorMatchAdjustments(
   const targetRange = refLum - Math.min(TARGET_INK_LUMINANCE, refLum);
   const currentRange = bgLum - inkLum;
   const brightnessOnlyFactor = Math.min(MAX_FACTOR, refLum / bgLum);
-  if (currentRange > 0 && brightnessOnlyFactor * currentRange < targetRange) {
+  if (currentRange >= MIN_INK_RANGE && brightnessOnlyFactor * currentRange < targetRange) {
     // 地色 → refLum、暗部 → 目標暗部 の 2 点を満たす m·k と k を解く
     const rangeRatio = targetRange / currentRange;
     contrastFactor = (rangeRatio * bgLum - refLum + 128) / 128;
@@ -607,18 +609,44 @@ export function computeColorMatchAdjustments(
     const adjusted = mapRgb(background, (v) =>
       clampChannel((clampChannel(v * brightnessFactor) - 128) * contrastFactor + 128),
     );
-    const adjustedChroma = chroma(adjusted);
-    if (adjustedChroma > 0) {
-      saturationFactor = chroma(referenceColor) / adjustedChroma;
+    if (chroma(adjusted) > 0) {
+      saturationFactor = solveSaturationFactor(adjusted, chroma(referenceColor));
     }
   }
-  saturationFactor = Math.max(0, Math.min(MAX_FACTOR, saturationFactor));
 
   return {
     brightness: factorToAdjustment(brightnessFactor),
     contrast: factorToAdjustment(contrastFactor),
     saturation: factorToAdjustment(saturationFactor),
   };
+}
+
+/** saturationFactor の二分探索の反復回数（0..MAX_FACTOR の範囲を 1e-4 程度まで絞り込む） */
+const SATURATION_SEARCH_ITERATIONS = 16;
+
+/**
+ * CSS filter の saturate(s) を、0..255 へのクリップを含めて RGB 色に適用する。
+ * Filter Effects 仕様の saturate 行列（Rec.709 輝度を保ったまま色差を s 倍する）に従う。
+ */
+function applySaturate(color: RgbColor, s: number): RgbColor {
+  const lum = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+  return mapRgb(color, (v) => clampChannel(lum + (v - lum) * s));
+}
+
+/**
+ * saturate 適用後の彩度（RGB 最大最小差）が targetChroma になる倍率を 0..MAX_FACTOR の範囲で求める。
+ * クリップを含めても彩度は倍率に対して単調非減少なので、二分探索で解く。
+ */
+function solveSaturationFactor(color: RgbColor, targetChroma: number): number {
+  if (chroma(applySaturate(color, MAX_FACTOR)) <= targetChroma) return MAX_FACTOR;
+  let lo = 0;
+  let hi = MAX_FACTOR;
+  for (let i = 0; i < SATURATION_SEARCH_ITERATIONS; i++) {
+    const mid = (lo + hi) / 2;
+    if (chroma(applySaturate(color, mid)) < targetChroma) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 /** 不透明画素の輝度から指定パーセンタイル（0..1）の値を返す。 */
