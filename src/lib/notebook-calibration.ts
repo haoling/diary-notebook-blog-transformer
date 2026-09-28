@@ -584,15 +584,15 @@ export function computeColorMatchAdjustments(
   // コントラスト倍率を確定させたうえで、地色輝度が refLum になる明るさ倍率を求める
   let brightnessFactor = ((refLum - 128) / contrastFactor + 128) / bgLum;
   if (brightnessFactor > MAX_FACTOR) {
-    // 明るさが上限に達する場合は、残りの輝度差をコントラストの増強で補う
+    // 明るさが上限に達する場合、コントラストは中間輝度 128 を軸に伸ばすため、
+    // 明るさ補正後の地色が 128 以下なら増強すると地色がかえって暗くなる。
+    // 128 を超える場合のみ、残りの輝度差をコントラストの増強で補う
     brightnessFactor = MAX_FACTOR;
     const brightenedLum = brightnessFactor * bgLum;
-    if (brightenedLum > 128 && refLum > brightenedLum) {
-      contrastFactor = Math.max(
-        contrastFactor,
-        Math.min(MAX_FACTOR, (refLum - 128) / (brightenedLum - 128)),
-      );
-    }
+    contrastFactor =
+      brightenedLum > 128 && refLum > brightenedLum
+        ? Math.min(MAX_FACTOR, (refLum - 128) / (brightenedLum - 128))
+        : 1;
   }
   brightnessFactor = Math.max(0, brightnessFactor);
 
