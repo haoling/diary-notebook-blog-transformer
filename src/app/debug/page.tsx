@@ -12,6 +12,7 @@ import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { NOTEBOOK_SIZE_PRESETS, LINE_HEIGHT_PRESETS } from "@/lib/notebook-presets";
 import {
   computeExpectedPitchPx,
+  detectRuledLines,
   pixelYsToLineYRatios,
   lineYRatiosToPixelYs,
 } from "@/lib/notebook-calibration";
@@ -84,6 +85,21 @@ export default function DebugPage() {
   const [ccLineHeightMm, setCcLineHeightMm] = useState("7");
   const [ccLineYsInput, setCcLineYsInput] = useState("100,200,300");
   const [ccRatiosInput, setCcRatiosInput] = useState("0.1,0.2,0.3");
+
+  // detectRuledLines テスト
+  const [rlImage, setRlImage] = useState<HTMLImageElement | null>(null);
+  const [rlFileName, setRlFileName] = useState("");
+  const [rlPageHeightMm, setRlPageHeightMm] = useState("210");
+  const [rlLineHeightMm, setRlLineHeightMm] = useState("6");
+  const [rlToleranceRatio, setRlToleranceRatio] = useState("0.15");
+  const [rlRunning, setRlRunning] = useState(false);
+  const [rlResult, setRlResult] = useState<{
+    lineYs: number[];
+    expectedPitchPx: number;
+    elapsedMs: number;
+  } | null>(null);
+  const [rlError, setRlError] = useState<string | null>(null);
+  const rlCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // IndexManager テスト
   const imRef = useRef<IndexManager | null>(null);
@@ -265,6 +281,80 @@ export default function DebugPage() {
     .map((s) => Number(s.trim()))
     .filter((n) => !Number.isNaN(n));
   const ccPixelYs = lineYRatiosToPixelYs(ccParsedRatios, Number(ccImageHeightPx) || 0);
+
+  // --- detectRuledLines テスト ---
+  const handleRlFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      setRlImage(img);
+      setRlFileName(file.name);
+      setRlResult(null);
+      setRlError(null);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setRlError("画像の読み込みに失敗しました");
+    };
+    img.src = url;
+  }, []);
+
+  const handleRlDetect = useCallback(async () => {
+    if (!rlImage) return;
+    const pageHeightMm = Number(rlPageHeightMm);
+    const lineHeightMm = Number(rlLineHeightMm);
+    const toleranceRatio = Number(rlToleranceRatio);
+    if (!(pageHeightMm > 0) || !(lineHeightMm > 0) || !(toleranceRatio > 0)) {
+      setRlError("pageHeightMm / lineHeightMm / toleranceRatio は正の数を指定してください");
+      return;
+    }
+    setRlRunning(true);
+    setRlError(null);
+    try {
+      const expectedPitchPx = computeExpectedPitchPx(rlImage.naturalHeight, {
+        sizePreset: "custom",
+        pageWidthMm: 0,
+        pageHeightMm,
+        lineHeightPreset: "custom",
+        lineHeightMm,
+      });
+      const start = performance.now();
+      const lineYs = await detectRuledLines(rlImage, { expectedPitchPx, toleranceRatio });
+      setRlResult({ lineYs, expectedPitchPx, elapsedMs: performance.now() - start });
+    } catch (err) {
+      setRlError(err instanceof Error ? err.message : String(err));
+      setRlResult(null);
+    } finally {
+      setRlRunning(false);
+    }
+  }, [rlImage, rlPageHeightMm, rlLineHeightMm, rlToleranceRatio]);
+
+  // 検出結果を画像に重ねて描画する
+  useEffect(() => {
+    const canvas = rlCanvasRef.current;
+    if (!canvas || !rlImage) return;
+    canvas.width = rlImage.naturalWidth;
+    canvas.height = rlImage.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(rlImage, 0, 0);
+    if (!rlResult) return;
+    ctx.strokeStyle = "rgba(239, 68, 68, 0.85)";
+    ctx.lineWidth = Math.max(1, Math.round(rlImage.naturalHeight / 1000));
+    for (const y of rlResult.lineYs) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(rlImage.naturalWidth, y);
+      ctx.stroke();
+    }
+  }, [rlImage, rlResult]);
+
+  const rlPitches = rlResult
+    ? rlResult.lineYs.slice(1).map((y, i) => y - rlResult.lineYs[i])
+    : [];
 
   const handleSmGetNotebookProfile = useCallback(() => {
     const sm = smRef.current;
@@ -900,6 +990,66 @@ export default function DebugPage() {
                 lineYs → lineYRatios → pixelYs と変換して、元の lineYs（昇順ソート済み）と一致することを確認できる。
               </p>
             </div>
+          </div>
+        </div>
+
+        {/* detectRuledLines テスト */}
+        <div className="mt-8 bg-white rounded-2xl shadow-sm border border-rose-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-rose-100 bg-rose-50">
+            <h2 className="font-semibold text-rose-700">
+              📓 detectRuledLines テスト
+            </h2>
+          </div>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-600">
+              罫線ページの写真を読み込み、検出した罫線を赤線で重ねて表示する（一時的な確認用）。
+              期待ピッチは画像の高さと pageHeightMm / lineHeightMm から computeExpectedPitchPx で算出する。
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="file" accept="image/*" onChange={handleRlFileChange} className="text-sm" />
+              {rlImage && (
+                <span className="text-xs text-slate-500">
+                  {rlFileName}（{rlImage.naturalWidth} × {rlImage.naturalHeight}px）
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-slate-500">pageHeightMm</label>
+              <input type="number" value={rlPageHeightMm} onChange={(e) => setRlPageHeightMm(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
+              <label className="text-xs text-slate-500">lineHeightMm</label>
+              <input type="number" value={rlLineHeightMm} onChange={(e) => setRlLineHeightMm(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
+              <label className="text-xs text-slate-500">toleranceRatio</label>
+              <input type="number" step="0.01" value={rlToleranceRatio} onChange={(e) => setRlToleranceRatio(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
+              <button
+                onClick={handleRlDetect}
+                disabled={!rlImage || rlRunning}
+                className="px-3 py-1.5 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50 transition-colors"
+              >
+                {rlRunning ? "検出中..." : "罫線を検出"}
+              </button>
+            </div>
+            {rlError && (
+              <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{rlError}</div>
+            )}
+            {rlResult && (
+              <div className="space-y-1 text-sm text-slate-700 bg-rose-50 rounded-lg px-3 py-2 font-mono break-words">
+                <div>
+                  検出本数: {rlResult.lineYs.length} / 期待ピッチ: {rlResult.expectedPitchPx.toFixed(2)}px / 処理時間: {rlResult.elapsedMs.toFixed(0)}ms
+                </div>
+                {rlPitches.length > 0 && (
+                  <div>
+                    実測ピッチ: 最小 {Math.min(...rlPitches).toFixed(2)} / 最大 {Math.max(...rlPitches).toFixed(2)} / 平均{" "}
+                    {(rlPitches.reduce((a, b) => a + b, 0) / rlPitches.length).toFixed(2)}px
+                  </div>
+                )}
+                <div className="text-xs text-slate-500">
+                  lineYs: [{rlResult.lineYs.map((y) => y.toFixed(1)).join(", ")}]
+                </div>
+              </div>
+            )}
+            {rlImage && (
+              <canvas ref={rlCanvasRef} className="max-w-full h-auto border border-slate-200 rounded-lg" />
+            )}
           </div>
         </div>
 
