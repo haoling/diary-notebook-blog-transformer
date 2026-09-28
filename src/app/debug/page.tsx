@@ -307,8 +307,8 @@ export default function DebugPage() {
     const pageHeightMm = Number(rlPageHeightMm);
     const lineHeightMm = Number(rlLineHeightMm);
     const toleranceRatio = Number(rlToleranceRatio);
-    if (!(pageHeightMm > 0) || !(lineHeightMm > 0) || !(toleranceRatio > 0)) {
-      setRlError("pageHeightMm / lineHeightMm / toleranceRatio は正の数を指定してください");
+    if (!(pageHeightMm > 0) || !(lineHeightMm > 0) || !(toleranceRatio > 0 && toleranceRatio < 1)) {
+      setRlError("pageHeightMm / lineHeightMm は正の数、toleranceRatio は 0 より大きく 1 未満で指定してください");
       return;
     }
     setRlRunning(true);
@@ -1006,7 +1006,8 @@ export default function DebugPage() {
               期待ピッチは画像の高さと pageHeightMm / lineHeightMm から computeExpectedPitchPx で算出する。
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <input type="file" accept="image/*" onChange={handleRlFileChange} className="text-sm" />
+              <label htmlFor="rl-image-file" className="text-xs text-slate-500">画像ファイル</label>
+              <input id="rl-image-file" type="file" accept="image/*" onChange={handleRlFileChange} className="text-sm" />
               {rlImage && (
                 <span className="text-xs text-slate-500">
                   {rlFileName}（{rlImage.naturalWidth} × {rlImage.naturalHeight}px）
@@ -1014,12 +1015,12 @@ export default function DebugPage() {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <label className="text-xs text-slate-500">pageHeightMm</label>
-              <input type="number" value={rlPageHeightMm} onChange={(e) => setRlPageHeightMm(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
-              <label className="text-xs text-slate-500">lineHeightMm</label>
-              <input type="number" value={rlLineHeightMm} onChange={(e) => setRlLineHeightMm(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
-              <label className="text-xs text-slate-500">toleranceRatio</label>
-              <input type="number" step="0.01" value={rlToleranceRatio} onChange={(e) => setRlToleranceRatio(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
+              <label htmlFor="rl-page-height-mm" className="text-xs text-slate-500">pageHeightMm</label>
+              <input id="rl-page-height-mm" type="number" value={rlPageHeightMm} onChange={(e) => setRlPageHeightMm(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
+              <label htmlFor="rl-line-height-mm" className="text-xs text-slate-500">lineHeightMm</label>
+              <input id="rl-line-height-mm" type="number" value={rlLineHeightMm} onChange={(e) => setRlLineHeightMm(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
+              <label htmlFor="rl-tolerance-ratio" className="text-xs text-slate-500">toleranceRatio</label>
+              <input id="rl-tolerance-ratio" type="number" step="0.01" value={rlToleranceRatio} onChange={(e) => setRlToleranceRatio(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />
               <button
                 onClick={handleRlDetect}
                 disabled={!rlImage || rlRunning}

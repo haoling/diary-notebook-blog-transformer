@@ -178,6 +178,10 @@ export function detectRuledLinesFromProfile(
   const height = profile.length;
   const pitch = options.expectedPitchPx;
   const tolerance = options.toleranceRatio ?? 0.15;
+  // 探索範囲に負・無限のピッチが入らないよう、許容比率は 0 < toleranceRatio < 1 に限定する
+  if (!Number.isFinite(tolerance) || tolerance <= 0 || tolerance >= 1) {
+    throw new RangeError(`toleranceRatio は 0 より大きく 1 未満の有限値で指定してください: ${tolerance}`);
+  }
   if (!(pitch > 1) || height < pitch * 2) return [];
 
   const darkness = Float64Array.from(profile);
@@ -296,22 +300,27 @@ function fitGridAndInterpolate(
     }
   }
 
-  // グリッド y = offset + k × pitch に対し、インライアで重み付き最小二乗の再推定を繰り返す
+  // グリッド y = offset + k × pitch に対し、インライアで最小二乗の再推定を繰り返す
   let offset = bestOffset;
   let pitch = bestPitch;
   let inliers = new Map<number, { y: number; residual: number; strength: number }>();
   for (const inlierRatio of [0.3, 0.25, 0.2]) {
-    inliers = new Map();
+    const nextInliers = new Map<number, { y: number; residual: number; strength: number }>();
     for (const c of candidates) {
       const k = Math.round((c.y - offset) / pitch);
       const r = Math.abs(c.y - (offset + k * pitch));
       if (r > pitch * inlierRatio) continue;
-      const existing = inliers.get(k);
+      const existing = nextInliers.get(k);
       if (!existing || r < existing.residual) {
-        inliers.set(k, { y: c.y, residual: r, strength: c.strength });
+        nextInliers.set(k, { y: c.y, residual: r, strength: c.strength });
       }
     }
-    if (inliers.size < 2) break;
+    // 閾値を狭めて 2 点未満になった場合は、直前の有効なインライアを保持して打ち切る
+    if (nextInliers.size < 2) {
+      if (inliers.size === 0) inliers = nextInliers;
+      break;
+    }
+    inliers = nextInliers;
 
     let sw = 0, sk = 0, sy = 0, skk = 0, sky = 0;
     for (const [k, { y }] of inliers) {
