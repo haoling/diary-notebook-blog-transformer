@@ -17,13 +17,13 @@ import {
   pixelYsToLineYRatios,
   lineYRatiosToPixelYs,
 } from "@/lib/notebook-calibration";
-import type { RgbColor } from "@/lib/notebook-calibration";
 import type {
   Settings,
   AppIndex,
   NotebookSizePreset,
   LineHeightPreset,
   NotebookCalibration,
+  RgbColor,
 } from "@/types/settings";
 
 type FileEntry = {
