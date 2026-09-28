@@ -129,6 +129,8 @@ export default function DebugPage() {
   const [cmError, setCmError] = useState<string | null>(null);
   const cmBeforeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cmAfterCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // 画像を続けて選択した場合に、古い読み込み結果で上書きしないための世代番号
+  const cmLoadSeqRef = useRef(0);
 
   // IndexManager テスト
   const imRef = useRef<IndexManager | null>(null);
@@ -463,17 +465,22 @@ export default function DebugPage() {
   const handleCmFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const seq = ++cmLoadSeqRef.current;
+    setCmImage(null);
+    setCmImageLabel("");
+    setCmResult(null);
+    setCmError(null);
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
+      if (seq !== cmLoadSeqRef.current) return;
       setCmImage(img);
       setCmImageLabel(`${file.name}（${img.naturalWidth} × ${img.naturalHeight}px）`);
-      setCmResult(null);
-      setCmError(null);
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
+      if (seq !== cmLoadSeqRef.current) return;
       setCmError("画像の読み込みに失敗しました");
     };
     img.src = url;
@@ -1306,11 +1313,11 @@ export default function DebugPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label htmlFor="cm-ref-color" className="text-xs text-slate-500">参照色</label>
-              <input id="cm-ref-color" type="color" value={cmRefColor} onChange={(e) => setCmRefColor(e.target.value)} className="h-8 w-12" />
+              <input id="cm-ref-color" type="color" value={cmRefColor} onChange={(e) => { setCmRefColor(e.target.value); setCmResult(null); }} className="h-8 w-12" />
               <label htmlFor="cm-sim-brightness" className="text-xs text-slate-500">模擬: 明るさ</label>
-              <input id="cm-sim-brightness" type="number" step="10" value={cmSimBrightness} onChange={(e) => setCmSimBrightness(e.target.value)} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
+              <input id="cm-sim-brightness" type="number" step="10" value={cmSimBrightness} onChange={(e) => { setCmSimBrightness(e.target.value); setCmResult(null); }} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
               <label htmlFor="cm-sim-saturation" className="text-xs text-slate-500">模擬: 彩度</label>
-              <input id="cm-sim-saturation" type="number" step="10" value={cmSimSaturation} onChange={(e) => setCmSimSaturation(e.target.value)} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
+              <input id="cm-sim-saturation" type="number" step="10" value={cmSimSaturation} onChange={(e) => { setCmSimSaturation(e.target.value); setCmResult(null); }} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
               <button
                 onClick={handleCmAnalyze}
                 disabled={!cmImage}
