@@ -14,9 +14,11 @@ import {
   computeExpectedPitchPx,
   detectRuledLines,
   sampleBackgroundColor,
+  analyzeColorMatchAdjustments,
   pixelYsToLineYRatios,
   lineYRatiosToPixelYs,
 } from "@/lib/notebook-calibration";
+import type { ColorMatchAdjustments } from "@/lib/notebook-calibration";
 import type {
   Settings,
   AppIndex,
@@ -111,6 +113,22 @@ export default function DebugPage() {
   const [bgResult, setBgResult] = useState<{ color: RgbColor; elapsedMs: number } | null>(null);
   const [bgError, setBgError] = useState<string | null>(null);
   const bgCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // analyzeColorMatchAdjustments テスト
+  const [cmImage, setCmImage] = useState<HTMLImageElement | null>(null);
+  const [cmImageLabel, setCmImageLabel] = useState("");
+  const [cmRefColor, setCmRefColor] = useState("#f5ebc8");
+  const [cmSimBrightness, setCmSimBrightness] = useState("0");
+  const [cmSimSaturation, setCmSimSaturation] = useState("0");
+  const [cmResult, setCmResult] = useState<{
+    adjustments: ColorMatchAdjustments;
+    before: RgbColor;
+    after: RgbColor;
+    elapsedMs: number;
+  } | null>(null);
+  const [cmError, setCmError] = useState<string | null>(null);
+  const cmBeforeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cmAfterCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // IndexManager テスト
   const imRef = useRef<IndexManager | null>(null);
@@ -440,6 +458,82 @@ export default function DebugPage() {
       `合成画像（地色 ${bgSynthColor} / 罫線 ${bgSynthLines ? "あり" : "なし"} / インク約 ${(inkRatio * 100).toFixed(0)}%）`,
     );
   }, [bgSynthColor, bgSynthLines, bgSynthInkRatio, runBgSample]);
+
+  // --- analyzeColorMatchAdjustments テスト ---
+  const handleCmFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      setCmImage(img);
+      setCmImageLabel(`${file.name}（${img.naturalWidth} × ${img.naturalHeight}px）`);
+      setCmResult(null);
+      setCmError(null);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setCmError("画像の読み込みに失敗しました");
+    };
+    img.src = url;
+  }, []);
+
+  // 撮影条件（明るさ・彩度のずれ）を模擬した画像に対して補正値を算出し、適用結果を比較する
+  const handleCmAnalyze = useCallback(() => {
+    const beforeCanvas = cmBeforeCanvasRef.current;
+    const afterCanvas = cmAfterCanvasRef.current;
+    if (!cmImage || !beforeCanvas || !afterCanvas) return;
+    const simBrightness = Number(cmSimBrightness);
+    const simSaturation = Number(cmSimSaturation);
+    if (!Number.isFinite(simBrightness) || !Number.isFinite(simSaturation)) {
+      setCmError("撮影条件の模擬値は数値で指定してください");
+      return;
+    }
+    const hex = cmRefColor.replace("#", "");
+    const referenceColor: RgbColor = {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+    setCmError(null);
+    try {
+      const width = cmImage.naturalWidth;
+      const height = cmImage.naturalHeight;
+      beforeCanvas.width = width;
+      beforeCanvas.height = height;
+      const beforeCtx = beforeCanvas.getContext("2d", { willReadFrequently: true });
+      afterCanvas.width = width;
+      afterCanvas.height = height;
+      const afterCtx = afterCanvas.getContext("2d", { willReadFrequently: true });
+      if (!beforeCtx || !afterCtx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
+      beforeCtx.filter = `brightness(${1 + simBrightness / 100}) saturate(${Math.max(0, 1 + simSaturation / 100)})`;
+      beforeCtx.drawImage(cmImage, 0, 0);
+      beforeCtx.filter = "none";
+
+      const start = performance.now();
+      const adjustments = analyzeColorMatchAdjustments(beforeCanvas, referenceColor);
+      const elapsedMs = performance.now() - start;
+
+      afterCtx.filter = [
+        `brightness(${1 + adjustments.brightness / 100})`,
+        `contrast(${1 + adjustments.contrast / 100})`,
+        `saturate(${1 + adjustments.saturation / 100})`,
+      ].join(" ");
+      afterCtx.drawImage(beforeCanvas, 0, 0);
+      afterCtx.filter = "none";
+
+      setCmResult({
+        adjustments,
+        before: sampleBackgroundColor(beforeCanvas),
+        after: sampleBackgroundColor(afterCanvas),
+        elapsedMs,
+      });
+    } catch (err) {
+      setCmError(err instanceof Error ? err.message : String(err));
+      setCmResult(null);
+    }
+  }, [cmImage, cmRefColor, cmSimBrightness, cmSimSaturation]);
 
   const rlPitches = rlResult
     ? rlResult.lineYs.slice(1).map((y, i) => y - rlResult.lineYs[i])
@@ -1191,6 +1285,79 @@ export default function DebugPage() {
               </div>
             )}
             <canvas ref={bgCanvasRef} className={`max-w-full h-auto border border-slate-200 rounded-lg ${bgSourceLabel ? "" : "hidden"}`} />
+          </div>
+        </div>
+
+        {/* analyzeColorMatchAdjustments テスト */}
+        <div className="mt-8 bg-white rounded-2xl shadow-sm border border-orange-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-orange-100 bg-orange-50">
+            <h2 className="font-semibold text-orange-700">
+              🌈 analyzeColorMatchAdjustments テスト
+            </h2>
+          </div>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-600">
+              画像の地色を参照色に近づける明るさ・コントラスト・彩度の補正値を算出し、適用結果を比較する（一時的な確認用）。
+              撮影条件の模擬値で意図的に暗く/明るく、彩度を高く/低くした画像を作ってから算出できる。
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="cm-image-file" className="text-xs text-slate-500">画像ファイル</label>
+              <input id="cm-image-file" type="file" accept="image/*" onChange={handleCmFileChange} className="text-sm" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="cm-ref-color" className="text-xs text-slate-500">参照色</label>
+              <input id="cm-ref-color" type="color" value={cmRefColor} onChange={(e) => setCmRefColor(e.target.value)} className="h-8 w-12" />
+              <label htmlFor="cm-sim-brightness" className="text-xs text-slate-500">模擬: 明るさ</label>
+              <input id="cm-sim-brightness" type="number" step="10" value={cmSimBrightness} onChange={(e) => setCmSimBrightness(e.target.value)} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
+              <label htmlFor="cm-sim-saturation" className="text-xs text-slate-500">模擬: 彩度</label>
+              <input id="cm-sim-saturation" type="number" step="10" value={cmSimSaturation} onChange={(e) => setCmSimSaturation(e.target.value)} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
+              <button
+                onClick={handleCmAnalyze}
+                disabled={!cmImage}
+                className="px-3 py-1.5 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50"
+              >
+                補正値を算出して適用
+              </button>
+            </div>
+            {cmImageLabel && <div className="text-xs text-slate-500">{cmImageLabel}</div>}
+            {cmError && (
+              <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{cmError}</div>
+            )}
+            {cmResult && (
+              <div className="space-y-2 text-sm text-slate-700 bg-orange-50 rounded-lg px-3 py-2 font-mono break-words">
+                <div>
+                  補正値: brightness {cmResult.adjustments.brightness} / contrast {cmResult.adjustments.contrast} / saturation {cmResult.adjustments.saturation} / 処理時間: {cmResult.elapsedMs.toFixed(0)}ms
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  {([
+                    ["補正前の地色", cmResult.before],
+                    ["補正後の地色", cmResult.after],
+                  ] as const).map(([label, color]) => (
+                    <div key={label} className="flex items-center gap-2">
+                      <div
+                        className="w-8 h-8 rounded border border-slate-300 shrink-0"
+                        style={{ backgroundColor: `rgb(${color.r}, ${color.g}, ${color.b})` }}
+                      />
+                      <span>{label}: rgb({color.r}, {color.g}, {color.b})</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded border border-slate-300 shrink-0" style={{ backgroundColor: cmRefColor }} />
+                    <span>参照色: {cmRefColor}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${cmResult ? "" : "hidden"}`}>
+              <div>
+                <div className="text-xs text-slate-500 mb-1">補正前（模擬後）</div>
+                <canvas ref={cmBeforeCanvasRef} className="max-w-full h-auto border border-slate-200 rounded-lg" />
+              </div>
+              <div>
+                <div className="text-xs text-slate-500 mb-1">補正後</div>
+                <canvas ref={cmAfterCanvasRef} className="max-w-full h-auto border border-slate-200 rounded-lg" />
+              </div>
+            </div>
           </div>
         </div>
 
