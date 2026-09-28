@@ -508,6 +508,16 @@ function chroma({ r, g, b }: RgbColor): number {
   return Math.max(r, g, b) - Math.min(r, g, b);
 }
 
+/** 0..255 にクリップする */
+function clampChannel(value: number): number {
+  return Math.max(0, Math.min(255, value));
+}
+
+/** RGB の各チャンネルに関数を適用する */
+function mapRgb({ r, g, b }: RgbColor, fn: (value: number) => number): RgbColor {
+  return { r: fn(r), g: fn(g), b: fn(b) };
+}
+
 /** 倍率（1 = 変更なし）を -100..100 スケールの整数に変換する */
 function factorToAdjustment(factor: number): number {
   const value = Math.round((factor - 1) * 100);
@@ -576,13 +586,18 @@ export function computeColorMatchAdjustments(
     Math.min(MAX_FACTOR, ((refLum - 128) / contrastFactor + 128) / bgLum),
   );
 
-  // brightness・contrast はチャンネル共通の線形変換なので、地色の彩度は m·k 倍になる
+  // 無彩色の地色は saturate で色を付けられない（インクの色だけが強調される）ため、
+  // 補正前の地色の彩度で判定し、補正しない
   let saturationFactor = 1;
-  const bgChroma = chroma(background) * brightnessFactor * contrastFactor;
-  const refChroma = chroma(referenceColor);
-  // 無彩色の地色は saturate で色を付けられない（インクの色だけが強調される）ため補正しない
-  if (bgChroma >= MIN_CHROMA) {
-    saturationFactor = refChroma / bgChroma;
+  if (chroma(background) >= MIN_CHROMA) {
+    // CSS filter は段ごとに 0..255 へクリップされるため、各段のクリップを再現した補正後の地色で彩度を求める
+    const adjusted = mapRgb(background, (v) =>
+      clampChannel((clampChannel(v * brightnessFactor) - 128) * contrastFactor + 128),
+    );
+    const adjustedChroma = chroma(adjusted);
+    if (adjustedChroma > 0) {
+      saturationFactor = chroma(referenceColor) / adjustedChroma;
+    }
   }
   saturationFactor = Math.max(0, Math.min(MAX_FACTOR, saturationFactor));
 
