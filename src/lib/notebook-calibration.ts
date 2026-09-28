@@ -569,11 +569,12 @@ export function computeColorMatchAdjustments(
   const refLum = luminance(referenceColor.r, referenceColor.g, referenceColor.b);
   const inkLum = Math.min(inkLuminance, bgLum);
 
-  // 明るさのみで地色輝度を合わせた場合のダイナミックレンジが目標に届くか判定する
+  // 明るさのみで地色輝度を合わせた場合（明るさの上限を反映）のダイナミックレンジが目標に届くか判定する
   let contrastFactor = 1;
   const targetRange = refLum - Math.min(TARGET_INK_LUMINANCE, refLum);
   const currentRange = bgLum - inkLum;
-  if (currentRange > 0 && (refLum / bgLum) * currentRange < targetRange) {
+  const brightnessOnlyFactor = Math.min(MAX_FACTOR, refLum / bgLum);
+  if (currentRange > 0 && brightnessOnlyFactor * currentRange < targetRange) {
     // 地色 → refLum、暗部 → 目標暗部 の 2 点を満たす m·k と k を解く
     const rangeRatio = targetRange / currentRange;
     contrastFactor = (rangeRatio * bgLum - refLum + 128) / 128;
@@ -581,10 +582,19 @@ export function computeColorMatchAdjustments(
   contrastFactor = Math.max(1, Math.min(MAX_FACTOR, contrastFactor));
 
   // コントラスト倍率を確定させたうえで、地色輝度が refLum になる明るさ倍率を求める
-  const brightnessFactor = Math.max(
-    0,
-    Math.min(MAX_FACTOR, ((refLum - 128) / contrastFactor + 128) / bgLum),
-  );
+  let brightnessFactor = ((refLum - 128) / contrastFactor + 128) / bgLum;
+  if (brightnessFactor > MAX_FACTOR) {
+    // 明るさが上限に達する場合は、残りの輝度差をコントラストの増強で補う
+    brightnessFactor = MAX_FACTOR;
+    const brightenedLum = brightnessFactor * bgLum;
+    if (brightenedLum > 128 && refLum > brightenedLum) {
+      contrastFactor = Math.max(
+        contrastFactor,
+        Math.min(MAX_FACTOR, (refLum - 128) / (brightenedLum - 128)),
+      );
+    }
+  }
+  brightnessFactor = Math.max(0, brightnessFactor);
 
   // 無彩色の地色は saturate で色を付けられない（インクの色だけが強調される）ため、
   // 補正前の地色の彩度で判定し、補正しない
