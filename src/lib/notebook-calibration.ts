@@ -583,32 +583,40 @@ export function computeColorMatchAdjustments(
   }
   contrastFactor = Math.max(1, Math.min(MAX_FACTOR, contrastFactor));
 
-  // コントラスト倍率を確定させたうえで、地色輝度が refLum になる明るさ倍率を求める
-  let brightnessFactor = ((refLum - 128) / contrastFactor + 128) / bgLum;
-  if (brightnessFactor > MAX_FACTOR) {
-    // 明るさが上限に達する場合、コントラストは中間輝度 128 を軸に伸ばすため、
-    // 明るさ補正後の地色が 128 以下なら増強すると地色がかえって暗くなる。
-    // 128 を超え、なお参照輝度に届かない場合のみ、残りの輝度差をコントラストの増強で補う。
-    // それ以外はコントラストを変えず、参照輝度を超えない範囲の明るさ倍率にする
-    const brightenedLum = MAX_FACTOR * bgLum;
-    if (brightenedLum > 128 && refLum > brightenedLum) {
-      brightnessFactor = MAX_FACTOR;
-      contrastFactor = Math.min(MAX_FACTOR, (refLum - 128) / (brightenedLum - 128));
-    } else {
-      brightnessFactor = Math.min(MAX_FACTOR, refLum / bgLum);
-      contrastFactor = 1;
+  // コントラスト倍率を確定させたうえで、各段のクリップを含めた地色輝度が refLum になる明るさ倍率を求める
+  // （輝度は明るさ倍率に対して単調非減少なので二分探索で解く）
+  let brightnessFactor: number;
+  if (adjustedLuminance(background, MAX_FACTOR, contrastFactor) >= refLum) {
+    let lo = 0;
+    let hi = MAX_FACTOR;
+    for (let i = 0; i < FACTOR_SEARCH_ITERATIONS; i++) {
+      const mid = (lo + hi) / 2;
+      if (adjustedLuminance(background, mid, contrastFactor) < refLum) lo = mid;
+      else hi = mid;
+    }
+    brightnessFactor = (lo + hi) / 2;
+  } else {
+    // 明るさを上限にしても届かない場合は、コントラストで残りの輝度差を補う。
+    // コントラストは中間輝度 128 を軸に伸ばすため暗いチャンネルは暗くなる。
+    // クリップを含めた輝度が参照輝度に最も近くなる倍率を選ぶ（同程度なら小さい倍率を優先）
+    brightnessFactor = MAX_FACTOR;
+    let bestError = Infinity;
+    for (let step = 0; step <= CONTRAST_SEARCH_STEPS; step++) {
+      const k = 1 + ((MAX_FACTOR - 1) * step) / CONTRAST_SEARCH_STEPS;
+      const error = Math.abs(adjustedLuminance(background, MAX_FACTOR, k) - refLum);
+      if (error < bestError - 1e-6) {
+        bestError = error;
+        contrastFactor = k;
+      }
     }
   }
-  brightnessFactor = Math.max(0, brightnessFactor);
 
   // 無彩色の地色は saturate で色を付けられない（インクの色だけが強調される）ため、
   // 補正前の地色の彩度で判定し、補正しない
   let saturationFactor = 1;
   if (chroma(background) >= MIN_CHROMA) {
     // CSS filter は段ごとに 0..255 へクリップされるため、各段のクリップを再現した補正後の地色で彩度を求める
-    const adjusted = mapRgb(background, (v) =>
-      clampChannel((clampChannel(v * brightnessFactor) - 128) * contrastFactor + 128),
-    );
+    const adjusted = applyBrightnessContrastToColor(background, brightnessFactor, contrastFactor);
     if (chroma(adjusted) > 0) {
       saturationFactor = solveSaturationFactor(adjusted, chroma(referenceColor));
     }
@@ -621,8 +629,21 @@ export function computeColorMatchAdjustments(
   };
 }
 
-/** saturationFactor の二分探索の反復回数（0..MAX_FACTOR の範囲を 1e-4 程度まで絞り込む） */
-const SATURATION_SEARCH_ITERATIONS = 16;
+/** 倍率の二分探索の反復回数（0..MAX_FACTOR の範囲を 1e-4 程度まで絞り込む） */
+const FACTOR_SEARCH_ITERATIONS = 16;
+/** 明るさ上限到達時にコントラスト倍率を探索する分割数（1..MAX_FACTOR を 0.01 刻み） */
+const CONTRAST_SEARCH_STEPS = 100;
+
+/** brightness(m) → contrast(k) を段ごとの 0..255 クリップ込みで RGB 色に適用する。 */
+function applyBrightnessContrastToColor(color: RgbColor, m: number, k: number): RgbColor {
+  return mapRgb(color, (v) => clampChannel((clampChannel(v * m) - 128) * k + 128));
+}
+
+/** brightness(m) → contrast(k) 適用後（クリップ込み）の輝度 */
+function adjustedLuminance(color: RgbColor, m: number, k: number): number {
+  const { r, g, b } = applyBrightnessContrastToColor(color, m, k);
+  return luminance(r, g, b);
+}
 
 /**
  * CSS filter の saturate(s) を、0..255 へのクリップを含めて RGB 色に適用する。
@@ -641,7 +662,7 @@ function solveSaturationFactor(color: RgbColor, targetChroma: number): number {
   if (chroma(applySaturate(color, MAX_FACTOR)) <= targetChroma) return MAX_FACTOR;
   let lo = 0;
   let hi = MAX_FACTOR;
-  for (let i = 0; i < SATURATION_SEARCH_ITERATIONS; i++) {
+  for (let i = 0; i < FACTOR_SEARCH_ITERATIONS; i++) {
     const mid = (lo + hi) / 2;
     if (chroma(applySaturate(color, mid)) < targetChroma) lo = mid;
     else hi = mid;

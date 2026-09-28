@@ -493,8 +493,11 @@ export default function DebugPage() {
     if (!cmImage || !beforeCanvas || !afterCanvas) return;
     const simBrightness = Number(cmSimBrightness);
     const simSaturation = Number(cmSimSaturation);
-    if (!Number.isFinite(simBrightness) || !Number.isFinite(simSaturation)) {
-      setCmError("撮影条件の模擬値は数値で指定してください");
+    // 空欄は Number("") = 0 になるため明示的に弾き、CSS filter が無効にならない -100..100 に限定する
+    const isValidSim = (raw: string, value: number) =>
+      raw.trim() !== "" && Number.isFinite(value) && value >= -100 && value <= 100;
+    if (!isValidSim(cmSimBrightness, simBrightness) || !isValidSim(cmSimSaturation, simSaturation)) {
+      setCmError("撮影条件の模擬値は -100〜100 の数値で指定してください");
       return;
     }
     const hex = cmRefColor.replace("#", "");
@@ -514,7 +517,7 @@ export default function DebugPage() {
       afterCanvas.height = height;
       const afterCtx = afterCanvas.getContext("2d", { willReadFrequently: true });
       if (!beforeCtx || !afterCtx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
-      beforeCtx.filter = `brightness(${1 + simBrightness / 100}) saturate(${Math.max(0, 1 + simSaturation / 100)})`;
+      beforeCtx.filter = `brightness(${1 + simBrightness / 100}) saturate(${1 + simSaturation / 100})`;
       beforeCtx.drawImage(cmImage, 0, 0);
       beforeCtx.filter = "none";
 
@@ -1315,9 +1318,9 @@ export default function DebugPage() {
               <label htmlFor="cm-ref-color" className="text-xs text-slate-500">参照色</label>
               <input id="cm-ref-color" type="color" value={cmRefColor} onChange={(e) => { setCmRefColor(e.target.value); setCmResult(null); }} className="h-8 w-12" />
               <label htmlFor="cm-sim-brightness" className="text-xs text-slate-500">模擬: 明るさ</label>
-              <input id="cm-sim-brightness" type="number" step="10" value={cmSimBrightness} onChange={(e) => { setCmSimBrightness(e.target.value); setCmResult(null); }} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
+              <input id="cm-sim-brightness" type="number" step="10" min="-100" max="100" value={cmSimBrightness} onChange={(e) => { setCmSimBrightness(e.target.value); setCmResult(null); }} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
               <label htmlFor="cm-sim-saturation" className="text-xs text-slate-500">模擬: 彩度</label>
-              <input id="cm-sim-saturation" type="number" step="10" value={cmSimSaturation} onChange={(e) => { setCmSimSaturation(e.target.value); setCmResult(null); }} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
+              <input id="cm-sim-saturation" type="number" step="10" min="-100" max="100" value={cmSimSaturation} onChange={(e) => { setCmSimSaturation(e.target.value); setCmResult(null); }} className="w-20 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300" />
               <button
                 onClick={handleCmAnalyze}
                 disabled={!cmImage}
