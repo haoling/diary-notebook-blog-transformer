@@ -508,8 +508,14 @@ export default function DebugPage() {
     };
     setCmError(null);
     try {
-      const width = cmImage.naturalWidth;
-      const height = cmImage.naturalHeight;
+      // 大きな画像を原寸で 2 枚の Canvas に描くとメモリを大量に使うため、確認用に長辺を上限まで縮小する
+      const CM_PREVIEW_MAX_SIDE = 1600;
+      const previewScale = Math.min(
+        1,
+        CM_PREVIEW_MAX_SIDE / Math.max(cmImage.naturalWidth, cmImage.naturalHeight),
+      );
+      const width = Math.max(1, Math.round(cmImage.naturalWidth * previewScale));
+      const height = Math.max(1, Math.round(cmImage.naturalHeight * previewScale));
       beforeCanvas.width = width;
       beforeCanvas.height = height;
       const beforeCtx = beforeCanvas.getContext("2d", { willReadFrequently: true });
@@ -518,7 +524,7 @@ export default function DebugPage() {
       const afterCtx = afterCanvas.getContext("2d", { willReadFrequently: true });
       if (!beforeCtx || !afterCtx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
       beforeCtx.filter = `brightness(${1 + simBrightness / 100}) saturate(${1 + simSaturation / 100})`;
-      beforeCtx.drawImage(cmImage, 0, 0);
+      beforeCtx.drawImage(cmImage, 0, 0, width, height);
       beforeCtx.filter = "none";
 
       const start = performance.now();

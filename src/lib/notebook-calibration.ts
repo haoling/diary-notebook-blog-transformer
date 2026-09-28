@@ -534,7 +534,8 @@ function factorToAdjustment(factor: number): number {
  * - 明るさ: 地色の輝度が参照色の輝度になるよう倍率を決める
  * - コントラスト: インク暗部（輝度 0.5 パーセンタイル）から地色までのダイナミックレンジが
  *   目標に満たない場合のみ増強する（減弱はしない。インクが写っていない場合は増強しない）
- * - 彩度: saturate のクリップを含めて、補正後の地色の彩度（RGB 最大最小差）が参照色の彩度になるよう倍率を決める
+ * - 彩度: saturate のクリップを含めて、補正後の地色が参照色に最も近づく（RGB 距離が最小になる）倍率を決める。
+ *   地色と参照色の色相が異なる場合は彩度を上げると色ずれが強調されるため、自然に彩度を下げる方向になる
  */
 export function analyzeColorMatchAdjustments(
   source: RuledLineSource,
@@ -618,7 +619,7 @@ export function computeColorMatchAdjustments(
     // CSS filter は段ごとに 0..255 へクリップされるため、各段のクリップを再現した補正後の地色で彩度を求める
     const adjusted = applyBrightnessContrastToColor(background, brightnessFactor, contrastFactor);
     if (chroma(adjusted) > 0) {
-      saturationFactor = solveSaturationFactor(adjusted, chroma(referenceColor));
+      saturationFactor = solveSaturationFactor(adjusted, referenceColor);
     }
   }
 
@@ -654,20 +655,33 @@ function applySaturate(color: RgbColor, s: number): RgbColor {
   return mapRgb(color, (v) => clampChannel(lum + (v - lum) * s));
 }
 
+/** 彩度倍率を探索する分割数（0..MAX_FACTOR を 0.01 刻み） */
+const SATURATION_SEARCH_STEPS = 200;
+
+/** RGB 色の二乗距離 */
+function squaredDistance(a: RgbColor, b: RgbColor): number {
+  return (a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2;
+}
+
 /**
- * saturate 適用後の彩度（RGB 最大最小差）が targetChroma になる倍率を 0..MAX_FACTOR の範囲で求める。
- * クリップを含めても彩度は倍率に対して単調非減少なので、二分探索で解く。
+ * saturate 適用後（クリップ込み）の色が target に最も近くなる倍率を 0..MAX_FACTOR の範囲で求める。
+ * 距離が同程度なら 1（変更なし）に近い倍率を優先する。
  */
-function solveSaturationFactor(color: RgbColor, targetChroma: number): number {
-  if (chroma(applySaturate(color, MAX_FACTOR)) <= targetChroma) return MAX_FACTOR;
-  let lo = 0;
-  let hi = MAX_FACTOR;
-  for (let i = 0; i < FACTOR_SEARCH_ITERATIONS; i++) {
-    const mid = (lo + hi) / 2;
-    if (chroma(applySaturate(color, mid)) < targetChroma) lo = mid;
-    else hi = mid;
+function solveSaturationFactor(color: RgbColor, target: RgbColor): number {
+  let best = 1;
+  let bestDistance = squaredDistance(color, target);
+  for (let step = 0; step <= SATURATION_SEARCH_STEPS; step++) {
+    const s = (MAX_FACTOR * step) / SATURATION_SEARCH_STEPS;
+    const distance = squaredDistance(applySaturate(color, s), target);
+    if (
+      distance < bestDistance - 1e-6 ||
+      (Math.abs(distance - bestDistance) <= 1e-6 && Math.abs(s - 1) < Math.abs(best - 1))
+    ) {
+      best = s;
+      bestDistance = distance;
+    }
   }
-  return (lo + hi) / 2;
+  return best;
 }
 
 /** 不透明画素の輝度から指定パーセンタイル（0..1）の値を返す。 */
