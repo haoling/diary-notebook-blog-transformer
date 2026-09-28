@@ -27,6 +27,7 @@ export type {
   Settings,
   NotebookSizePreset,
   LineHeightPreset,
+  RgbColor,
   NotebookCalibration,
   NotebookProfile,
   IndexSessionEntry,

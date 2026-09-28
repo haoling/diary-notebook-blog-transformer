@@ -4,13 +4,16 @@ export type NotebookSizePreset = "mini6ring" | "bible" | "a5" | "b6" | "custom";
 /** 罫線の行高プリセット。 */
 export type LineHeightPreset = "6mm" | "7mm" | "8mm" | "custom";
 
+/** RGB 色（各チャンネル 0..255）。 */
+export type RgbColor = { r: number; g: number; b: number };
+
 /** 手帳のキャリブレーション結果。 */
 export type NotebookCalibration = {
   calibratedAt: string;
   lineYRatios: number[];
   sourceImageHeightPx: number;
   sourceImageWidthPx?: number;
-  referenceColor: { r: number; g: number; b: number };
+  referenceColor: RgbColor;
 };
 
 /** 手帳プロファイル。 */

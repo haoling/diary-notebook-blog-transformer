@@ -6,7 +6,7 @@
  */
 
 import type { ParagraphObject, SplitResult } from "@/types/scan";
-import type { NotebookProfile } from "@/types/settings";
+import type { NotebookProfile, RgbColor } from "@/types/settings";
 
 /**
  * ParagraphObject[] から SplitResult を生成する。
@@ -377,4 +377,94 @@ function fitGridAndInterpolate(
     for (let j = 1; j < gap; j++) lines.push(y + localPitch * j);
   }
   return lines;
+}
+
+// ---------------------------------------------------------------------------
+// 地色サンプリング（sampleBackgroundColor）
+// ---------------------------------------------------------------------------
+
+/** 地色として採用するパーセンタイル（罫線・文字のインク画素を除外できる程度の中〜高位） */
+const BACKGROUND_PERCENTILE = 0.8;
+/** 地色サンプリング時に読み取る最大画素数（大きな画像は縮小してから読み取る） */
+const BACKGROUND_MAX_SAMPLES = 1_000_000;
+
+/**
+ * 画像から「紙の地色」を代表する RGB 値を抽出する。
+ *
+ * チャンネルごとのヒストグラムを作成し、80 パーセンタイルの値を採用する。
+ * 罫線・文字などのインク画素は紙より暗いため低位側に集まり、結果への影響が小さい。
+ * 画素数が上限を超える画像は、読み取り時のメモリ使用量を抑えるため縮小キャンバスに描画してから集計する。
+ */
+export function sampleBackgroundColor(canvas: HTMLCanvasElement): RgbColor {
+  const { width, height } = canvas;
+  if (width <= 0 || height <= 0) {
+    throw new RangeError("地色をサンプリングする画像のサイズが 0 です");
+  }
+
+  let target = canvas;
+  const scale = Math.sqrt(BACKGROUND_MAX_SAMPLES / (width * height));
+  if (scale < 1) {
+    // 画素値を平均化せず 2 次元的に間引くため、スムージングを無効にして縮小する
+    target = document.createElement("canvas");
+    target.width = Math.max(1, Math.floor(width * scale));
+    target.height = Math.max(1, Math.floor(height * scale));
+    const scaledCtx = target.getContext("2d");
+    if (!scaledCtx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
+    scaledCtx.imageSmoothingEnabled = false;
+    scaledCtx.drawImage(canvas, 0, 0, target.width, target.height);
+  }
+
+  const ctx = target.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
+  const { data } = ctx.getImageData(0, 0, target.width, target.height);
+  return sampleBackgroundColorFromPixels(data);
+}
+
+/**
+ * RGBA 画素配列から紙の地色を抽出する（全画素を集計する）。
+ * sampleBackgroundColor の Canvas 非依存部分。
+ */
+export function sampleBackgroundColorFromPixels(
+  data: ArrayLike<number>,
+  percentile: number = BACKGROUND_PERCENTILE,
+): RgbColor {
+  if (!Number.isFinite(percentile) || percentile < 0 || percentile > 1) {
+    throw new RangeError(`percentile は 0 以上 1 以下で指定してください: ${percentile}`);
+  }
+  const pixelCount = Math.floor(data.length / 4);
+
+  const histR = new Uint32Array(256);
+  const histG = new Uint32Array(256);
+  const histB = new Uint32Array(256);
+  let total = 0;
+  for (let p = 0; p < pixelCount; p++) {
+    const i = p * 4;
+    // 完全に透明な画素（画像外の余白など）は地色の候補から除外する
+    if (data[i + 3] === 0) continue;
+    histR[data[i]]++;
+    histG[data[i + 1]]++;
+    histB[data[i + 2]]++;
+    total++;
+  }
+  if (total === 0) {
+    throw new RangeError("地色をサンプリングできる不透明な画素がありません");
+  }
+
+  return {
+    r: histogramPercentile(histR, total, percentile),
+    g: histogramPercentile(histG, total, percentile),
+    b: histogramPercentile(histB, total, percentile),
+  };
+}
+
+/** ヒストグラムから指定パーセンタイル（0..1）の値を返す。 */
+function histogramPercentile(hist: Uint32Array, total: number, percentile: number): number {
+  // 下から数えて rank 番目（1 始まり）の値を返す
+  const rank = Math.max(1, Math.ceil(total * percentile));
+  let cumulative = 0;
+  for (let v = 0; v < hist.length; v++) {
+    cumulative += hist[v];
+    if (cumulative >= rank) return v;
+  }
+  return hist.length - 1;
 }

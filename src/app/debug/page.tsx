@@ -13,6 +13,7 @@ import { NOTEBOOK_SIZE_PRESETS, LINE_HEIGHT_PRESETS } from "@/lib/notebook-prese
 import {
   computeExpectedPitchPx,
   detectRuledLines,
+  sampleBackgroundColor,
   pixelYsToLineYRatios,
   lineYRatiosToPixelYs,
 } from "@/lib/notebook-calibration";
@@ -22,6 +23,7 @@ import type {
   NotebookSizePreset,
   LineHeightPreset,
   NotebookCalibration,
+  RgbColor,
 } from "@/types/settings";
 
 type FileEntry = {
@@ -100,6 +102,15 @@ export default function DebugPage() {
   } | null>(null);
   const [rlError, setRlError] = useState<string | null>(null);
   const rlCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // sampleBackgroundColor テスト
+  const [bgSourceLabel, setBgSourceLabel] = useState("");
+  const [bgSynthColor, setBgSynthColor] = useState("#f5ebc8");
+  const [bgSynthLines, setBgSynthLines] = useState(true);
+  const [bgSynthInkRatio, setBgSynthInkRatio] = useState("0.1");
+  const [bgResult, setBgResult] = useState<{ color: RgbColor; elapsedMs: number } | null>(null);
+  const [bgError, setBgError] = useState<string | null>(null);
+  const bgCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // IndexManager テスト
   const imRef = useRef<IndexManager | null>(null);
@@ -351,6 +362,84 @@ export default function DebugPage() {
       ctx.stroke();
     }
   }, [rlImage, rlResult]);
+
+  // --- sampleBackgroundColor テスト ---
+  const runBgSample = useCallback((canvas: HTMLCanvasElement, label: string) => {
+    setBgSourceLabel(label);
+    setBgError(null);
+    try {
+      const start = performance.now();
+      const color = sampleBackgroundColor(canvas);
+      setBgResult({ color, elapsedMs: performance.now() - start });
+    } catch (err) {
+      setBgError(err instanceof Error ? err.message : String(err));
+      setBgResult(null);
+    }
+  }, []);
+
+  const handleBgFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const canvas = bgCanvasRef.current;
+    if (!file || !canvas) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) {
+        setBgError("Canvas 2D コンテキストを取得できませんでした");
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      runBgSample(canvas, `${file.name}（${img.naturalWidth} × ${img.naturalHeight}px）`);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setBgError("画像の読み込みに失敗しました");
+    };
+    img.src = url;
+  }, [runBgSample]);
+
+  // 指定色の地に罫線・インク画素を描いた合成画像で抽出結果を確認する
+  const handleBgSynthesize = useCallback(() => {
+    const canvas = bgCanvasRef.current;
+    if (!canvas) return;
+    const inkRatio = Number(bgSynthInkRatio);
+    if (!(inkRatio >= 0 && inkRatio < 1)) {
+      setBgError("インク画素の割合は 0 以上 1 未満で指定してください");
+      return;
+    }
+    const width = 600;
+    const height = 850;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) {
+      setBgError("Canvas 2D コンテキストを取得できませんでした");
+      return;
+    }
+    ctx.fillStyle = bgSynthColor;
+    ctx.fillRect(0, 0, width, height);
+    if (bgSynthLines) {
+      ctx.fillStyle = "rgb(150, 170, 200)";
+      for (let y = 40; y < height; y += 40) ctx.fillRect(0, y, width, 2);
+    }
+    // インク画素（文字の代わり）をランダムな短い横線として散らす
+    ctx.fillStyle = "rgb(30, 30, 40)";
+    const inkPixels = width * height * inkRatio;
+    let drawn = 0;
+    while (drawn < inkPixels) {
+      const w = 4 + Math.floor(Math.random() * 12);
+      ctx.fillRect(Math.floor(Math.random() * width), Math.floor(Math.random() * height), w, 2);
+      drawn += w * 2;
+    }
+    runBgSample(
+      canvas,
+      `合成画像（地色 ${bgSynthColor} / 罫線 ${bgSynthLines ? "あり" : "なし"} / インク約 ${(inkRatio * 100).toFixed(0)}%）`,
+    );
+  }, [bgSynthColor, bgSynthLines, bgSynthInkRatio, runBgSample]);
 
   const rlPitches = rlResult
     ? rlResult.lineYs.slice(1).map((y, i) => y - rlResult.lineYs[i])
@@ -1051,6 +1140,57 @@ export default function DebugPage() {
             {rlImage && (
               <canvas ref={rlCanvasRef} className="max-w-full h-auto border border-slate-200 rounded-lg" />
             )}
+          </div>
+        </div>
+
+        {/* sampleBackgroundColor テスト */}
+        <div className="mt-8 bg-white rounded-2xl shadow-sm border border-amber-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-amber-100 bg-amber-50">
+            <h2 className="font-semibold text-amber-700">
+              🎨 sampleBackgroundColor テスト
+            </h2>
+          </div>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-600">
+              画像から紙の地色（チャンネルごとの 80 パーセンタイル）を抽出する（一時的な確認用）。
+              合成画像では指定した地色と抽出結果を比較し、罫線・インク画素の影響が小さいことを確認できる。
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="bg-image-file" className="text-xs text-slate-500">画像ファイル</label>
+              <input id="bg-image-file" type="file" accept="image/*" onChange={handleBgFileChange} className="text-sm" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="bg-synth-color" className="text-xs text-slate-500">合成画像の地色</label>
+              <input id="bg-synth-color" type="color" value={bgSynthColor} onChange={(e) => setBgSynthColor(e.target.value)} className="h-8 w-12" />
+              <label htmlFor="bg-synth-lines" className="text-xs text-slate-500">罫線</label>
+              <input id="bg-synth-lines" type="checkbox" checked={bgSynthLines} onChange={(e) => setBgSynthLines(e.target.checked)} />
+              <label htmlFor="bg-synth-ink" className="text-xs text-slate-500">インク画素の割合</label>
+              <input id="bg-synth-ink" type="number" step="0.05" value={bgSynthInkRatio} onChange={(e) => setBgSynthInkRatio(e.target.value)} className="w-24 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+              <button
+                onClick={handleBgSynthesize}
+                className="px-3 py-1.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+              >
+                合成画像で抽出
+              </button>
+            </div>
+            {bgError && (
+              <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{bgError}</div>
+            )}
+            {bgResult && (
+              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700 bg-amber-50 rounded-lg px-3 py-2 font-mono break-words">
+                <div
+                  className="w-10 h-10 rounded border border-slate-300 shrink-0"
+                  style={{ backgroundColor: `rgb(${bgResult.color.r}, ${bgResult.color.g}, ${bgResult.color.b})` }}
+                />
+                <div>
+                  <div>
+                    抽出結果: rgb({bgResult.color.r}, {bgResult.color.g}, {bgResult.color.b}) / 処理時間: {bgResult.elapsedMs.toFixed(0)}ms
+                  </div>
+                  <div className="text-xs text-slate-500">{bgSourceLabel}</div>
+                </div>
+              </div>
+            )}
+            <canvas ref={bgCanvasRef} className={`max-w-full h-auto border border-slate-200 rounded-lg ${bgSourceLabel ? "" : "hidden"}`} />
           </div>
         </div>
 
