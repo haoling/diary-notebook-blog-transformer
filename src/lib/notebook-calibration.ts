@@ -396,28 +396,37 @@ const BACKGROUND_MAX_SAMPLES = 1_000_000;
  * 画素数が上限を超える画像は、読み取り時のメモリ使用量を抑えるため縮小キャンバスに描画してから集計する。
  */
 export function sampleBackgroundColor(canvas: HTMLCanvasElement): RgbColor {
-  const { width, height } = canvas;
+  return sampleBackgroundColorFromPixels(readSampledPixels(canvas));
+}
+
+/**
+ * 画像ソースの RGBA 画素配列を読み取る。
+ * 画素数が上限を超える画像は、スムージングを無効にした縮小キャンバスに描画して間引く。
+ */
+function readSampledPixels(source: RuledLineSource): Uint8ClampedArray {
+  const { width, height } = getSourceSize(source);
   if (width <= 0 || height <= 0) {
     throw new RangeError("地色をサンプリングする画像のサイズが 0 です");
   }
 
-  let target = canvas;
   const scale = Math.sqrt(BACKGROUND_MAX_SAMPLES / (width * height));
-  if (scale < 1) {
-    // 画素値を平均化せず 2 次元的に間引くため、スムージングを無効にして縮小する
+  let target: HTMLCanvasElement;
+  if (source instanceof HTMLCanvasElement && scale >= 1) {
+    target = source;
+  } else {
+    // 画素値を平均化せず 2 次元的に間引くため、スムージングを無効にして描画する
     target = document.createElement("canvas");
-    target.width = Math.max(1, Math.floor(width * scale));
-    target.height = Math.max(1, Math.floor(height * scale));
-    const scaledCtx = target.getContext("2d");
-    if (!scaledCtx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
-    scaledCtx.imageSmoothingEnabled = false;
-    scaledCtx.drawImage(canvas, 0, 0, target.width, target.height);
+    target.width = Math.max(1, Math.floor(width * Math.min(1, scale)));
+    target.height = Math.max(1, Math.floor(height * Math.min(1, scale)));
+    const drawCtx = target.getContext("2d");
+    if (!drawCtx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
+    drawCtx.imageSmoothingEnabled = false;
+    drawCtx.drawImage(source, 0, 0, target.width, target.height);
   }
 
   const ctx = target.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
-  const { data } = ctx.getImageData(0, 0, target.width, target.height);
-  return sampleBackgroundColorFromPixels(data);
+  return ctx.getImageData(0, 0, target.width, target.height).data;
 }
 
 /**
@@ -467,4 +476,225 @@ function histogramPercentile(hist: Uint32Array, total: number, percentile: numbe
     if (cumulative >= rank) return v;
   }
   return hist.length - 1;
+}
+
+// ---------------------------------------------------------------------------
+// 地色合わせの色補正値算出（analyzeColorMatchAdjustments）
+// ---------------------------------------------------------------------------
+
+/** 地色合わせの補正値（applyBrightnessContrast / CSS filter と同じ -100..100 スケール、0 = 変更なし）。 */
+export type ColorMatchAdjustments = {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+};
+
+/** インクの暗部を代表する輝度パーセンタイル（インクの少ないページでも紙の画素を拾わない程度に低くする） */
+const INK_PERCENTILE = 0.005;
+/** 暗部と地色の輝度差がこれ未満なら、インクが写っていないとみなしてコントラストを増強しない */
+const MIN_INK_RANGE = 16;
+/** 補正後に確保したい暗部の輝度（地色との差がダイナミックレンジの目標になる） */
+const TARGET_INK_LUMINANCE = 40;
+/** これ未満の彩度（RGB 最大最小差）は無彩色のノイズとみなし、彩度補正を行わない */
+const MIN_CHROMA = 4;
+/** 補正倍率の上限（-100..100 スケールの 100 に相当） */
+const MAX_FACTOR = 2;
+
+/** ITU-R BT.601 輝度 */
+function luminance(r: number, g: number, b: number): number {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+/** RGB の最大最小差（彩度の指標） */
+function chroma({ r, g, b }: RgbColor): number {
+  return Math.max(r, g, b) - Math.min(r, g, b);
+}
+
+/** 0..255 にクリップする */
+function clampChannel(value: number): number {
+  return Math.max(0, Math.min(255, value));
+}
+
+/** RGB の各チャンネルに関数を適用する */
+function mapRgb({ r, g, b }: RgbColor, fn: (value: number) => number): RgbColor {
+  return { r: fn(r), g: fn(g), b: fn(b) };
+}
+
+/** 倍率（1 = 変更なし）を -100..100 スケールの整数に変換する */
+function factorToAdjustment(factor: number): number {
+  const value = Math.round((factor - 1) * 100);
+  // -0 を 0 に正規化する
+  return Math.max(-100, Math.min(100, value)) || 0;
+}
+
+/**
+ * 画像自身の地色を検出し、地色を referenceColor に近づけるための補正値を算出する。
+ *
+ * 補正は CSS filter の brightness → contrast → saturate の順で適用される前提で算出する。
+ * - 明るさ: 地色の輝度が参照色の輝度になるよう倍率を決める
+ * - コントラスト: インク暗部（輝度 0.5 パーセンタイル）から地色までのダイナミックレンジが
+ *   目標に満たない場合のみ増強する（減弱はしない。インクが写っていない場合は増強しない）
+ * - 彩度: saturate のクリップを含めて、補正後の地色が参照色に最も近づく（RGB 距離が最小になる）倍率を決める。
+ *   地色と参照色の色相が異なる場合は彩度を上げると色ずれが強調されるため、自然に彩度を下げる方向になる
+ */
+export function analyzeColorMatchAdjustments(
+  source: RuledLineSource,
+  referenceColor: RgbColor,
+): ColorMatchAdjustments {
+  return computeColorMatchAdjustmentsFromPixels(readSampledPixels(source), referenceColor);
+}
+
+/**
+ * RGBA 画素配列から地色合わせの補正値を算出する。
+ * analyzeColorMatchAdjustments の Canvas 非依存部分。
+ */
+export function computeColorMatchAdjustmentsFromPixels(
+  data: ArrayLike<number>,
+  referenceColor: RgbColor,
+): ColorMatchAdjustments {
+  const background = sampleBackgroundColorFromPixels(data);
+  const inkLuminance = luminancePercentile(data, INK_PERCENTILE);
+  return computeColorMatchAdjustments(background, inkLuminance, referenceColor);
+}
+
+/**
+ * 地色・インク暗部の輝度・参照色から補正値を算出する（画素非依存の計算部分）。
+ *
+ * CSS filter の brightness(m) は v → m·v、contrast(k) は v → (v − 128)·k + 128 と近似できるため、
+ * 地色輝度 Lb は (m·Lb − 128)·k + 128、ダイナミックレンジ Lb − Ld は m·k 倍になる。
+ */
+export function computeColorMatchAdjustments(
+  background: RgbColor,
+  inkLuminance: number,
+  referenceColor: RgbColor,
+): ColorMatchAdjustments {
+  const bgLum = Math.max(1, luminance(background.r, background.g, background.b));
+  const refLum = luminance(referenceColor.r, referenceColor.g, referenceColor.b);
+  const inkLum = Math.min(inkLuminance, bgLum);
+
+  // 明るさのみで地色輝度を合わせた場合（明るさの上限を反映）のダイナミックレンジが目標に届くか判定する
+  let contrastFactor = 1;
+  const targetRange = refLum - Math.min(TARGET_INK_LUMINANCE, refLum);
+  const currentRange = bgLum - inkLum;
+  const brightnessOnlyFactor = Math.min(MAX_FACTOR, refLum / bgLum);
+  if (currentRange >= MIN_INK_RANGE && brightnessOnlyFactor * currentRange < targetRange) {
+    // 地色 → refLum、暗部 → 目標暗部 の 2 点を満たす m·k と k を解く
+    const rangeRatio = targetRange / currentRange;
+    contrastFactor = (rangeRatio * bgLum - refLum + 128) / 128;
+  }
+  contrastFactor = Math.max(1, Math.min(MAX_FACTOR, contrastFactor));
+
+  // コントラスト倍率を確定させたうえで、各段のクリップを含めた地色輝度が refLum になる明るさ倍率を求める
+  // （輝度は明るさ倍率に対して単調非減少なので二分探索で解く）
+  let brightnessFactor: number;
+  if (adjustedLuminance(background, MAX_FACTOR, contrastFactor) >= refLum) {
+    let lo = 0;
+    let hi = MAX_FACTOR;
+    for (let i = 0; i < FACTOR_SEARCH_ITERATIONS; i++) {
+      const mid = (lo + hi) / 2;
+      if (adjustedLuminance(background, mid, contrastFactor) < refLum) lo = mid;
+      else hi = mid;
+    }
+    brightnessFactor = (lo + hi) / 2;
+  } else {
+    // 明るさを上限にしても届かない場合は、コントラストで残りの輝度差を補う。
+    // コントラストは中間輝度 128 を軸に伸ばすため暗いチャンネルは暗くなる。
+    // クリップを含めた輝度が参照輝度に最も近くなる倍率を選ぶ（同程度なら小さい倍率を優先）
+    brightnessFactor = MAX_FACTOR;
+    let bestError = Infinity;
+    for (let step = 0; step <= CONTRAST_SEARCH_STEPS; step++) {
+      const k = 1 + ((MAX_FACTOR - 1) * step) / CONTRAST_SEARCH_STEPS;
+      const error = Math.abs(adjustedLuminance(background, MAX_FACTOR, k) - refLum);
+      if (error < bestError - 1e-6) {
+        bestError = error;
+        contrastFactor = k;
+      }
+    }
+  }
+
+  // 無彩色の地色は saturate で色を付けられない（インクの色だけが強調される）ため、
+  // 補正前の地色の彩度で判定し、補正しない
+  let saturationFactor = 1;
+  if (chroma(background) >= MIN_CHROMA) {
+    // CSS filter は段ごとに 0..255 へクリップされるため、各段のクリップを再現した補正後の地色で彩度を求める
+    const adjusted = applyBrightnessContrastToColor(background, brightnessFactor, contrastFactor);
+    if (chroma(adjusted) > 0) {
+      saturationFactor = solveSaturationFactor(adjusted, referenceColor);
+    }
+  }
+
+  return {
+    brightness: factorToAdjustment(brightnessFactor),
+    contrast: factorToAdjustment(contrastFactor),
+    saturation: factorToAdjustment(saturationFactor),
+  };
+}
+
+/** 倍率の二分探索の反復回数（0..MAX_FACTOR の範囲を 1e-4 程度まで絞り込む） */
+const FACTOR_SEARCH_ITERATIONS = 16;
+/** 明るさ上限到達時にコントラスト倍率を探索する分割数（1..MAX_FACTOR を 0.01 刻み） */
+const CONTRAST_SEARCH_STEPS = 100;
+
+/** brightness(m) → contrast(k) を段ごとの 0..255 クリップ込みで RGB 色に適用する。 */
+function applyBrightnessContrastToColor(color: RgbColor, m: number, k: number): RgbColor {
+  return mapRgb(color, (v) => clampChannel((clampChannel(v * m) - 128) * k + 128));
+}
+
+/** brightness(m) → contrast(k) 適用後（クリップ込み）の輝度 */
+function adjustedLuminance(color: RgbColor, m: number, k: number): number {
+  const { r, g, b } = applyBrightnessContrastToColor(color, m, k);
+  return luminance(r, g, b);
+}
+
+/**
+ * CSS filter の saturate(s) を、0..255 へのクリップを含めて RGB 色に適用する。
+ * Filter Effects 仕様の saturate 行列（Rec.709 輝度を保ったまま色差を s 倍する）に従う。
+ */
+function applySaturate(color: RgbColor, s: number): RgbColor {
+  const lum = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+  return mapRgb(color, (v) => clampChannel(lum + (v - lum) * s));
+}
+
+/** 彩度倍率を探索する分割数（0..MAX_FACTOR を 0.01 刻み） */
+const SATURATION_SEARCH_STEPS = 200;
+
+/** RGB 色の二乗距離 */
+function squaredDistance(a: RgbColor, b: RgbColor): number {
+  return (a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2;
+}
+
+/**
+ * saturate 適用後（クリップ込み）の色が target に最も近くなる倍率を 0..MAX_FACTOR の範囲で求める。
+ * 距離が同程度なら 1（変更なし）に近い倍率を優先する。
+ */
+function solveSaturationFactor(color: RgbColor, target: RgbColor): number {
+  let best = 1;
+  let bestDistance = squaredDistance(color, target);
+  for (let step = 0; step <= SATURATION_SEARCH_STEPS; step++) {
+    const s = (MAX_FACTOR * step) / SATURATION_SEARCH_STEPS;
+    const distance = squaredDistance(applySaturate(color, s), target);
+    if (
+      distance < bestDistance - 1e-6 ||
+      (Math.abs(distance - bestDistance) <= 1e-6 && Math.abs(s - 1) < Math.abs(best - 1))
+    ) {
+      best = s;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/** 不透明画素の輝度から指定パーセンタイル（0..1）の値を返す。 */
+function luminancePercentile(data: ArrayLike<number>, percentile: number): number {
+  const hist = new Uint32Array(256);
+  let total = 0;
+  const pixelCount = Math.floor(data.length / 4);
+  for (let p = 0; p < pixelCount; p++) {
+    const i = p * 4;
+    if (data[i + 3] === 0) continue;
+    hist[Math.round(luminance(data[i], data[i + 1], data[i + 2]))]++;
+    total++;
+  }
+  if (total === 0) return 0;
+  return histogramPercentile(hist, total, percentile);
 }
