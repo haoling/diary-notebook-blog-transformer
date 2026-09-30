@@ -5,7 +5,7 @@
  * 手帳プロファイル・キャリブレーションを利用した新方式の各種アルゴリズムを提供する。
  */
 
-import type { ParagraphObject, SplitResult } from "@/types/scan";
+import type { CropRect, ParagraphObject, SplitResult } from "@/types/scan";
 import type { NotebookProfile, RgbColor } from "@/types/settings";
 
 /**
@@ -697,4 +697,205 @@ function luminancePercentile(data: ArrayLike<number>, percentile: number): numbe
   }
   if (total === 0) return 0;
   return histogramPercentile(hist, total, percentile);
+}
+
+// ---------------------------------------------------------------------------
+// ページ矩形検出（detectPageRect）
+// ---------------------------------------------------------------------------
+
+/** detectPageRect のオプション。 */
+export type DetectPageRectOptions = {
+  /** 「ページ色」と判定する参照色との RGB ユークリッド距離の上限（既定 40） */
+  colorDistanceThreshold?: number;
+  /** 行・列の「ページ色」画素の割合がこの値以上なら、ページ内の行・列とみなす（既定 0.5） */
+  profileRatioThreshold?: number;
+  /** 幅高さ比の期待値からの許容ずれ比率（既定 0.25 = ±25%） */
+  aspectToleranceRatio?: number;
+  /** 「ページ色」画素が探索範囲全体に占める最小割合（既定 0.1） */
+  minPageAreaRatio?: number;
+  /** 投影プロファイル作成時に走査する画素の縦横それぞれの最大数（既定 400） */
+  maxSamples?: number;
+};
+
+/** 罫線・文字による分断を橋渡しする、範囲長に対する最大の隙間比率 */
+const PAGE_RUN_GAP_RATIO = 0.03;
+/** 矩形内の「ページ色」画素の割合の下限（背景の混入した矩形を除外する） */
+const PAGE_RECT_MIN_FILL_RATIO = 0.6;
+/** 検出矩形がある軸で探索範囲をほぼ全域覆っているとみなす比率（その軸の境界が見つかっていない） */
+const PAGE_RECT_FULL_COVER_RATIO = 0.98;
+
+/**
+ * 探索範囲の画像から、参照色（ページの地色）に近い領域としてページの矩形を検出する。
+ *
+ * 検出できない場合（ページ色の画素が少なすぎる・背景がページ色に近く境界が不明・
+ * 幅高さ比が期待値から大きく外れる）は null を返す。呼び出し側でガイド枠クロップにフォールバックする。
+ * 成功時は探索範囲内のローカル座標（px）で矩形を返す。
+ */
+export function detectPageRect(
+  searchCanvas: HTMLCanvasElement,
+  referenceColor: RgbColor,
+  expectedAspectRatio: number,
+  options: DetectPageRectOptions = {},
+): CropRect | null {
+  const { width, height } = searchCanvas;
+  if (width <= 0 || height <= 0) return null;
+  const ctx = searchCanvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
+  const { data } = ctx.getImageData(0, 0, width, height);
+  return detectPageRectFromPixels(data, width, height, referenceColor, expectedAspectRatio, options);
+}
+
+/**
+ * RGBA 画素配列からページ矩形を検出する。detectPageRect の Canvas 非依存部分。
+ */
+export function detectPageRectFromPixels(
+  data: ArrayLike<number>,
+  width: number,
+  height: number,
+  referenceColor: RgbColor,
+  expectedAspectRatio: number,
+  options: DetectPageRectOptions = {},
+): CropRect | null {
+  const {
+    colorDistanceThreshold = 40,
+    profileRatioThreshold = 0.5,
+    aspectToleranceRatio = 0.25,
+    minPageAreaRatio = 0.1,
+    maxSamples = 400,
+  } = options;
+  if (!(expectedAspectRatio > 0) || !Number.isFinite(expectedAspectRatio)) {
+    throw new RangeError(`expectedAspectRatio は正の有限値で指定してください: ${expectedAspectRatio}`);
+  }
+  if (!Number.isFinite(colorDistanceThreshold) || colorDistanceThreshold < 0) {
+    throw new RangeError(`colorDistanceThreshold は 0 以上の有限値で指定してください: ${colorDistanceThreshold}`);
+  }
+  if (!Number.isFinite(profileRatioThreshold) || profileRatioThreshold <= 0 || profileRatioThreshold > 1) {
+    throw new RangeError(`profileRatioThreshold は 0 より大きく 1 以下で指定してください: ${profileRatioThreshold}`);
+  }
+  if (!Number.isFinite(aspectToleranceRatio) || aspectToleranceRatio < 0) {
+    throw new RangeError(`aspectToleranceRatio は 0 以上の有限値で指定してください: ${aspectToleranceRatio}`);
+  }
+  if (!Number.isFinite(minPageAreaRatio) || minPageAreaRatio < 0 || minPageAreaRatio > 1) {
+    throw new RangeError(`minPageAreaRatio は 0 以上 1 以下で指定してください: ${minPageAreaRatio}`);
+  }
+  if (!Number.isInteger(maxSamples) || maxSamples <= 0) {
+    throw new RangeError(`maxSamples は正の整数で指定してください: ${maxSamples}`);
+  }
+  if (width <= 0 || height <= 0 || data.length < width * height * 4) return null;
+
+  // 1. サブサンプリングしながら、参照色との距離で「ページ色」の 2 値マスクを作る
+  const step = Math.max(1, Math.ceil(Math.max(width, height) / maxSamples));
+  const cols = Math.ceil(width / step);
+  const rows = Math.ceil(height / step);
+  const mask = new Uint8Array(cols * rows);
+  const thresholdSq = colorDistanceThreshold * colorDistanceThreshold;
+  let pageCount = 0;
+  for (let sy = 0; sy < rows; sy++) {
+    for (let sx = 0; sx < cols; sx++) {
+      const i = ((sy * step) * width + sx * step) * 4;
+      if (data[i + 3] === 0) continue;
+      const dr = data[i] - referenceColor.r;
+      const dg = data[i + 1] - referenceColor.g;
+      const db = data[i + 2] - referenceColor.b;
+      if (dr * dr + dg * dg + db * db <= thresholdSq) {
+        mask[sy * cols + sx] = 1;
+        pageCount++;
+      }
+    }
+  }
+  if (pageCount / (cols * rows) < minPageAreaRatio) return null;
+
+  // 2. 行・列の投影プロファイルから連続範囲を求める。
+  // まず全体で大まかな範囲を求め、その範囲内で再計算して背景の割合による希釈を減らす
+  const rowGap = Math.max(2, Math.round(rows * PAGE_RUN_GAP_RATIO));
+  const colGap = Math.max(2, Math.round(cols * PAGE_RUN_GAP_RATIO));
+  let rowRun = longestRun(projectRows(mask, cols, rows, 0, cols), profileRatioThreshold, rowGap);
+  let colRun = longestRun(projectCols(mask, cols, 0, rows), profileRatioThreshold, colGap);
+  if (rowRun && colRun) {
+    const refinedRows = longestRun(
+      projectRows(mask, cols, rows, colRun.start, colRun.end + 1),
+      profileRatioThreshold,
+      rowGap,
+    );
+    const refinedCols = longestRun(
+      projectCols(mask, cols, refinedRows?.start ?? rowRun.start, (refinedRows ?? rowRun).end + 1),
+      profileRatioThreshold,
+      colGap,
+    );
+    rowRun = refinedRows ?? rowRun;
+    colRun = refinedCols ?? colRun;
+  }
+  if (!rowRun || !colRun) return null;
+
+  const x = colRun.start * step;
+  const y = rowRun.start * step;
+  const rectW = Math.min(width, (colRun.end + 1) * step) - x;
+  const rectH = Math.min(height, (rowRun.end + 1) * step) - y;
+  if (rectW <= 0 || rectH <= 0) return null;
+
+  // 3. 背景がページ色に近く境界が見つからない場合は null。
+  // 探索範囲はガイド枠より広いため、どちらか一方の軸でも全域を覆うなら四辺を確定できていない
+  if (rectW / width >= PAGE_RECT_FULL_COVER_RATIO || rectH / height >= PAGE_RECT_FULL_COVER_RATIO) {
+    return null;
+  }
+
+  // 矩形内に背景が大きく混入している場合は null
+  let inside = 0;
+  for (let sy = rowRun.start; sy <= rowRun.end; sy++) {
+    for (let sx = colRun.start; sx <= colRun.end; sx++) inside += mask[sy * cols + sx];
+  }
+  const cells = (rowRun.end - rowRun.start + 1) * (colRun.end - colRun.start + 1);
+  if (inside / cells < PAGE_RECT_MIN_FILL_RATIO) return null;
+
+  // 4. 幅高さ比が期待値から大きく外れる場合は null
+  const aspect = rectW / rectH;
+  if (Math.abs(aspect / expectedAspectRatio - 1) > aspectToleranceRatio) return null;
+
+  return { x, y, width: rectW, height: rectH };
+}
+
+/** 各行の「ページ色」画素の割合（列 [c0, c1) の範囲）。 */
+function projectRows(mask: Uint8Array, cols: number, rows: number, c0: number, c1: number): Float64Array {
+  const profile = new Float64Array(rows);
+  const span = Math.max(1, c1 - c0);
+  for (let y = 0; y < rows; y++) {
+    let sum = 0;
+    for (let x = c0; x < c1; x++) sum += mask[y * cols + x];
+    profile[y] = sum / span;
+  }
+  return profile;
+}
+
+/** 各列の「ページ色」画素の割合（行 [r0, r1) の範囲）。 */
+function projectCols(mask: Uint8Array, cols: number, r0: number, r1: number): Float64Array {
+  const profile = new Float64Array(cols);
+  const span = Math.max(1, r1 - r0);
+  for (let y = r0; y < r1; y++) {
+    for (let x = 0; x < cols; x++) profile[x] += mask[y * cols + x];
+  }
+  for (let x = 0; x < cols; x++) profile[x] /= span;
+  return profile;
+}
+
+/**
+ * プロファイルが閾値以上の最長の連続範囲（両端含む）を返す。
+ * maxGap 以下の隙間（罫線・文字の行など）は同じ範囲として橋渡しする。
+ */
+function longestRun(
+  profile: ArrayLike<number>,
+  threshold: number,
+  maxGap: number,
+): { start: number; end: number } | null {
+  const runs: { start: number; end: number }[] = [];
+  for (let i = 0; i < profile.length; i++) {
+    if (profile[i] < threshold) continue;
+    const last = runs[runs.length - 1];
+    if (last && i - last.end - 1 <= maxGap) last.end = i;
+    else runs.push({ start: i, end: i });
+  }
+  let best: { start: number; end: number } | null = null;
+  for (const run of runs) {
+    if (!best || run.end - run.start > best.end - best.start) best = run;
+  }
+  return best;
 }
