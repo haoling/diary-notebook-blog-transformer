@@ -142,6 +142,22 @@ describe("IndexManager", () => {
         expect(manager.getArticles()).toEqual([{ id: "a1", title: "旧", date: "2026-01-01" }]);
       });
 
+      it("置換・削除の失敗後も、複数要素の並び順が元のまま復元される", async () => {
+        await manager.addArticle({ id: "a1", title: "1", date: "d" });
+        await manager.addArticle({ id: "a2", title: "2", date: "d" });
+        await manager.addArticle({ id: "a3", title: "3", date: "d" });
+        const order = () => manager.getArticles().map((a) => a.id);
+
+        drive.failNext("updateFileContent", new Error("boom"));
+        await expect(manager.addArticle({ id: "a1", title: "新", date: "d" })).rejects.toThrow("boom");
+        expect(order()).toEqual(["a1", "a2", "a3"]);
+        expect(manager.getArticles()[0].title).toBe("1");
+
+        drive.failNext("updateFileContent", new Error("boom"));
+        await expect(manager.removeArticle("a2")).rejects.toThrow("boom");
+        expect(order()).toEqual(["a1", "a2", "a3"]);
+      });
+
       it("削除に失敗したら、削除したエントリを元に戻す", async () => {
         await manager.addPhoto({ id: "p1", importedAt: "t", sourceType: "google_drive" });
         drive.failNext("updateFileContent", new Error("boom"));

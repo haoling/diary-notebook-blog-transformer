@@ -9,6 +9,9 @@ import type {
 
 const INDEX_FILE_NAME = "index.json";
 
+/** index.json 内のエントリ配列のキー。 */
+type EntryKey = "sessions" | "photos" | "articles";
+
 const DEFAULT_INDEX: AppIndex = {
   sessions: [],
   photos: [],
@@ -127,32 +130,29 @@ export class IndexManager {
     return p;
   }
 
-  /** エントリを ID で置換（なければ追加）し、取り消し用の逆操作を返す。 */
-  private upsertEntry<T extends { id: string }>(
-    key: "sessions" | "photos" | "articles",
-    entry: T,
+  /**
+   * エントリを ID で置換（replace=false なら単純追加）し、取り消し用の逆操作を返す。
+   * 変更は mutate() で直列化されているため、変更前の配列をそのまま戻せば順序も含めて完全に復元できる。
+   */
+  private upsertEntry<K extends EntryKey>(
+    key: K,
+    entry: AppIndex[K][number],
     replace: boolean,
   ): () => void {
-    const list = this.index![key] as unknown as T[];
-    const previous = replace ? list.filter((e) => e.id === entry.id) : [];
-    const cloned = this.cloneEntries([entry])[0];
-    (this.index![key] as unknown as T[]) = [...(replace ? list.filter((e) => e.id !== entry.id) : list), cloned];
+    const previous = this.index![key];
+    const kept = replace ? previous.filter((e) => e.id !== entry.id) : previous;
+    this.index![key] = [...kept, ...this.cloneEntries([entry])] as AppIndex[K];
     return () => {
-      const current = this.index![key] as unknown as T[];
-      (this.index![key] as unknown as T[]) = [...current.filter((e) => e !== cloned), ...previous];
+      this.index![key] = previous;
     };
   }
 
-  /** エントリを ID で削除し、取り消し用の逆操作を返す。 */
-  private removeEntry<T extends { id: string }>(
-    key: "sessions" | "photos" | "articles",
-    id: string,
-  ): () => void {
-    const list = this.index![key] as unknown as T[];
-    const removed = list.filter((e) => e.id === id);
-    (this.index![key] as unknown as T[]) = list.filter((e) => e.id !== id);
+  /** エントリを ID で削除し、取り消し用の逆操作を返す（変更前の配列をそのまま戻す）。 */
+  private removeEntry<K extends EntryKey>(key: K, id: string): () => void {
+    const previous = this.index![key];
+    this.index![key] = previous.filter((e) => e.id !== id) as AppIndex[K];
     return () => {
-      (this.index![key] as unknown as T[]) = [...(this.index![key] as unknown as T[]), ...removed];
+      this.index![key] = previous;
     };
   }
 
