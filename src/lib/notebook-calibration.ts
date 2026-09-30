@@ -5,7 +5,7 @@
  * 手帳プロファイル・キャリブレーションを利用した新方式の各種アルゴリズムを提供する。
  */
 
-import type { ParagraphObject, SplitResult } from "@/types/scan";
+import type { CropRect, ParagraphObject, SplitResult } from "@/types/scan";
 import type { NotebookProfile, RgbColor } from "@/types/settings";
 
 /**
@@ -703,9 +703,6 @@ function luminancePercentile(data: ArrayLike<number>, percentile: number): numbe
 // ページ矩形検出（detectPageRect）
 // ---------------------------------------------------------------------------
 
-/** ページ矩形（探索範囲内のローカル座標、px）。 */
-export type PageRect = { x: number; y: number; width: number; height: number };
-
 /** detectPageRect のオプション。 */
 export type DetectPageRectOptions = {
   /** 「ページ色」と判定する参照色との RGB ユークリッド距離の上限（既定 40） */
@@ -739,7 +736,7 @@ export function detectPageRect(
   referenceColor: RgbColor,
   expectedAspectRatio: number,
   options: DetectPageRectOptions = {},
-): PageRect | null {
+): CropRect | null {
   const { width, height } = searchCanvas;
   if (width <= 0 || height <= 0) return null;
   const ctx = searchCanvas.getContext("2d", { willReadFrequently: true });
@@ -758,7 +755,7 @@ export function detectPageRectFromPixels(
   referenceColor: RgbColor,
   expectedAspectRatio: number,
   options: DetectPageRectOptions = {},
-): PageRect | null {
+): CropRect | null {
   const {
     colorDistanceThreshold = 40,
     profileRatioThreshold = 0.5,
