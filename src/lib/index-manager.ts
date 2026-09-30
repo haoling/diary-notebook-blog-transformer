@@ -70,19 +70,6 @@ export class IndexManager {
     }
   }
 
-  /**
-   * インメモリ状態を appDataFolder に永続化する。version をインクリメントする。
-   *
-   * - last-write-wins 方針を採用しており、並行書き込み検知は行わない。
-   * - version は書き込みのたびに単調増加するスタンプであり、競合検知用ではない。
-   * - ファイルが消えていた場合のみ新規作成にフォールバックする。
-   */
-  private persist(): Promise<void> {
-    const p = this.persistChain.then(() => this.doPersist());
-    this.persistChain = p.catch(() => {});
-    return p;
-  }
-
   private async doPersist(): Promise<void> {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
@@ -120,18 +107,24 @@ export class IndexManager {
   }
 
   /**
-   * キャッシュを変更して永続化する。永続化に失敗した場合は rollback で変更を取り消し、
-   * キャッシュとファイルの不整合（次回の永続化で意図しない状態が保存される）を防ぐ。
-   * rollback は現在の状態に対する逆操作なので、並行する他の変更を巻き込まない。
+   * キャッシュへの変更の適用・永続化・失敗時のロールバックを、同じチェーンで直列化して実行する。
+   * apply は変更を適用し、その取り消し（逆操作）を返す。永続化に失敗した場合は取り消してから再スロー。
+   *
+   * 直列化により、先行する書き込みが後続の未確定な変更を巻き込まず、
+   * 失敗した変更が Drive に保存されたまま残ることも防ぐ。
    */
-  private async mutate(apply: () => void, rollback: () => void): Promise<void> {
-    apply();
-    try {
-      await this.persist();
-    } catch (err) {
-      rollback();
-      throw err;
-    }
+  private mutate(apply: () => () => void): Promise<void> {
+    const p = this.persistChain.then(async () => {
+      const undo = apply();
+      try {
+        await this.doPersist();
+      } catch (err) {
+        undo();
+        throw err;
+      }
+    });
+    this.persistChain = p.catch(() => {});
+    return p;
   }
 
   /** エントリを ID で置換（なければ追加）し、取り消し用の逆操作を返す。 */
@@ -214,13 +207,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    let undo: () => void = () => {};
-    await this.mutate(
-      () => {
-        undo = this.upsertEntry("sessions", entry, true);
-      },
-      () => undo(),
-    );
+    await this.mutate(() => this.upsertEntry("sessions", entry, true));
   }
 
   /** セッションエントリを ID で削除する。 */
@@ -228,13 +215,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    let undo: () => void = () => {};
-    await this.mutate(
-      () => {
-        undo = this.removeEntry("sessions", id);
-      },
-      () => undo(),
-    );
+    await this.mutate(() => this.removeEntry("sessions", id));
   }
 
   /** 写真エントリを追加する。 */
@@ -242,13 +223,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    let undo: () => void = () => {};
-    await this.mutate(
-      () => {
-        undo = this.upsertEntry("photos", entry, false);
-      },
-      () => undo(),
-    );
+    await this.mutate(() => this.upsertEntry("photos", entry, false));
   }
 
   /** 写真エントリを ID で削除する。 */
@@ -256,13 +231,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    let undo: () => void = () => {};
-    await this.mutate(
-      () => {
-        undo = this.removeEntry("photos", id);
-      },
-      () => undo(),
-    );
+    await this.mutate(() => this.removeEntry("photos", id));
   }
 
   /** 記事エントリを追加する。同一 ID が既存の場合は置換（upsert）。 */
@@ -270,13 +239,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    let undo: () => void = () => {};
-    await this.mutate(
-      () => {
-        undo = this.upsertEntry("articles", entry, true);
-      },
-      () => undo(),
-    );
+    await this.mutate(() => this.upsertEntry("articles", entry, true));
   }
 
   /** 記事エントリを ID で削除する。 */
@@ -284,12 +247,6 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    let undo: () => void = () => {};
-    await this.mutate(
-      () => {
-        undo = this.removeEntry("articles", id);
-      },
-      () => undo(),
-    );
+    await this.mutate(() => this.removeEntry("articles", id));
   }
 }

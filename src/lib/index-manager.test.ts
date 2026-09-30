@@ -157,6 +157,38 @@ describe("IndexManager", () => {
         await ok;
         expect(manager.getSessions().map((s) => s.id)).toEqual(["s2"]);
       });
+
+      it("先行する保存が成功し後続が失敗しても、失敗した変更は Drive に保存されない", async () => {
+        const original = drive.updateFileContent.bind(drive);
+        let calls = 0;
+        drive.updateFileContent = async (id, data) => {
+          if (++calls === 2) throw new Error("boom");
+          return original(id, data);
+        };
+        const a = manager.addSession({ id: "A", createdAt: "c", pageCount: 0 });
+        const b = manager.addSession({ id: "B", createdAt: "c", pageCount: 0 });
+        await a;
+        await expect(b).rejects.toThrow("boom");
+        expect(drive.read<{ sessions: { id: string }[] }>("index.json")!.sessions.map((s) => s.id)).toEqual(["A"]);
+        expect(manager.getSessions().map((s) => s.id)).toEqual(["A"]);
+      });
+
+      it("同一 ID の並行 upsert が一方失敗しても重複せず、成功した方の内容が残る", async () => {
+        const original = drive.updateFileContent.bind(drive);
+        let calls = 0;
+        drive.updateFileContent = async (id, data) => {
+          if (++calls === 2) throw new Error("boom");
+          return original(id, data);
+        };
+        const first = manager.addArticle({ id: "a1", title: "1", date: "d" });
+        const second = manager.addArticle({ id: "a1", title: "2", date: "d" });
+        await first;
+        await expect(second).rejects.toThrow("boom");
+        expect(manager.getArticles()).toEqual([{ id: "a1", title: "1", date: "d" }]);
+        expect(drive.read<{ articles: unknown[] }>("index.json")!.articles).toEqual([
+          { id: "a1", title: "1", date: "d" },
+        ]);
+      });
     });
 
     it("永続化に失敗しても、後続の操作は継続できる", async () => {
