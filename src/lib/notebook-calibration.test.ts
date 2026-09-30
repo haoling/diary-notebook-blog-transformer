@@ -72,7 +72,10 @@ describe("detectRuledLinesFromProfile", () => {
     const lines = detectRuledLinesFromProfile(ruledProfile(1000, 50, 25, [8, 9]), {
       expectedPitchPx: 50,
     });
-    // 欠番があっても 50px 間隔で連続している
+    // 欠番（8, 9 番目）があっても補間で本数が復元され、50px 間隔で連続している
+    expect(lines.length).toBeGreaterThanOrEqual(18);
+    expect(lines.some((y) => Math.abs(y - (25 + 8 * 50)) < 3)).toBe(true);
+    expect(lines.some((y) => Math.abs(y - (25 + 9 * 50)) < 3)).toBe(true);
     for (let i = 1; i < lines.length; i++) {
       expect(lines[i] - lines[i - 1]).toBeCloseTo(50, 0);
     }

@@ -125,6 +125,40 @@ describe("IndexManager", () => {
       warn.mockRestore();
     });
 
+    describe("永続化に失敗した場合のロールバック", () => {
+      it("追加に失敗したらキャッシュへ追加したエントリを取り消す", async () => {
+        drive.failNext("updateFileContent", new Error("boom"));
+        await expect(manager.addSession({ id: "s1", createdAt: "c", pageCount: 0 })).rejects.toThrow("boom");
+        expect(manager.getSessions()).toEqual([]);
+        // 次の正常な永続化で、失敗した変更が保存されない
+        await manager.addSession({ id: "s2", createdAt: "c", pageCount: 0 });
+        expect(drive.read<{ sessions: { id: string }[] }>("index.json")!.sessions.map((s) => s.id)).toEqual(["s2"]);
+      });
+
+      it("同一 ID の置換に失敗したら、置換前のエントリに戻す", async () => {
+        await manager.addArticle({ id: "a1", title: "旧", date: "2026-01-01" });
+        drive.failNext("updateFileContent", new Error("boom"));
+        await expect(manager.addArticle({ id: "a1", title: "新", date: "2026-01-02" })).rejects.toThrow("boom");
+        expect(manager.getArticles()).toEqual([{ id: "a1", title: "旧", date: "2026-01-01" }]);
+      });
+
+      it("削除に失敗したら、削除したエントリを元に戻す", async () => {
+        await manager.addPhoto({ id: "p1", importedAt: "t", sourceType: "google_drive" });
+        drive.failNext("updateFileContent", new Error("boom"));
+        await expect(manager.removePhoto("p1")).rejects.toThrow("boom");
+        expect(manager.getPhotos().map((p) => p.id)).toEqual(["p1"]);
+      });
+
+      it("失敗した変更の取り消しが、並行する成功した変更を巻き込まない", async () => {
+        drive.failNext("updateFileContent", new Error("boom"));
+        const failed = manager.addSession({ id: "s1", createdAt: "c", pageCount: 0 });
+        const ok = manager.addSession({ id: "s2", createdAt: "c", pageCount: 0 });
+        await expect(failed).rejects.toThrow("boom");
+        await ok;
+        expect(manager.getSessions().map((s) => s.id)).toEqual(["s2"]);
+      });
+    });
+
     it("永続化に失敗しても、後続の操作は継続できる", async () => {
       drive.failNext("updateFileContent", new Error("boom"));
       await expect(manager.addSession({ id: "s1", createdAt: "c", pageCount: 0 })).rejects.toThrow("boom");

@@ -187,6 +187,8 @@ describe("DriveClient", () => {
         .mockResolvedValueOnce(json({ files: [{ id: "1", name: "a", kind: "k" }], nextPageToken: "N" }))
         .mockResolvedValueOnce(json({ files: [{ id: "2", name: "b", kind: "k" }] }));
       expect((await client.listFilesInFolder("F")).map((f) => f.id)).toEqual(["1", "2"]);
+      expect(fetchMock.mock.calls[0][0]).not.toContain("pageToken");
+      expect(fetchMock.mock.calls[1][0]).toContain("pageToken=N");
     });
   });
 });

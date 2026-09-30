@@ -36,6 +36,8 @@ describe("SessionManager", () => {
       drive.failNext("updateFileContent", new Error("index down"));
       await expect(manager.createSession()).rejects.toThrow("index down");
       expect([...drive.files.values()].some((f) => f.name.startsWith("session_"))).toBe(false);
+      // インデックスのキャッシュにも削除済みセッションが残らない
+      expect(index.getSessions()).toEqual([]);
     });
   });
 
