@@ -9,6 +9,9 @@ import type {
 
 const INDEX_FILE_NAME = "index.json";
 
+/** index.json 内のエントリ配列のキー。 */
+type EntryKey = "sessions" | "photos" | "articles";
+
 const DEFAULT_INDEX: AppIndex = {
   sessions: [],
   photos: [],
@@ -70,19 +73,6 @@ export class IndexManager {
     }
   }
 
-  /**
-   * インメモリ状態を appDataFolder に永続化する。version をインクリメントする。
-   *
-   * - last-write-wins 方針を採用しており、並行書き込み検知は行わない。
-   * - version は書き込みのたびに単調増加するスタンプであり、競合検知用ではない。
-   * - ファイルが消えていた場合のみ新規作成にフォールバックする。
-   */
-  private persist(): Promise<void> {
-    const p = this.persistChain.then(() => this.doPersist());
-    this.persistChain = p.catch(() => {});
-    return p;
-  }
-
   private async doPersist(): Promise<void> {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
@@ -117,6 +107,53 @@ export class IndexManager {
     }
 
     this._version = nextVersion;
+  }
+
+  /**
+   * キャッシュへの変更の適用・永続化・失敗時のロールバックを、同じチェーンで直列化して実行する。
+   * apply は変更を適用し、その取り消し（逆操作）を返す。永続化に失敗した場合は取り消してから再スロー。
+   *
+   * 直列化により、先行する書き込みが後続の未確定な変更を巻き込まず、
+   * 失敗した変更が Drive に保存されたまま残ることも防ぐ。
+   */
+  private mutate(apply: () => () => void): Promise<void> {
+    const p = this.persistChain.then(async () => {
+      const undo = apply();
+      try {
+        await this.doPersist();
+      } catch (err) {
+        undo();
+        throw err;
+      }
+    });
+    this.persistChain = p.catch(() => {});
+    return p;
+  }
+
+  /**
+   * エントリを ID で置換（replace=false なら単純追加）し、取り消し用の逆操作を返す。
+   * 変更は mutate() で直列化されているため、変更前の配列をそのまま戻せば順序も含めて完全に復元できる。
+   */
+  private upsertEntry<K extends EntryKey>(
+    key: K,
+    entry: AppIndex[K][number],
+    replace: boolean,
+  ): () => void {
+    const previous = this.index![key];
+    const kept = replace ? previous.filter((e) => e.id !== entry.id) : previous;
+    this.index![key] = [...kept, ...this.cloneEntries([entry])] as AppIndex[K];
+    return () => {
+      this.index![key] = previous;
+    };
+  }
+
+  /** エントリを ID で削除し、取り消し用の逆操作を返す（変更前の配列をそのまま戻す）。 */
+  private removeEntry<K extends EntryKey>(key: K, id: string): () => void {
+    const previous = this.index![key];
+    this.index![key] = previous.filter((e) => e.id !== id) as AppIndex[K];
+    return () => {
+      this.index![key] = previous;
+    };
   }
 
   private cloneEntries<T>(entries: T[]): T[] {
@@ -170,9 +207,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.sessions = this.index.sessions.filter((s) => s.id !== entry.id);
-    this.index.sessions.push(...this.cloneEntries([entry]));
-    await this.persist();
+    await this.mutate(() => this.upsertEntry("sessions", entry, true));
   }
 
   /** セッションエントリを ID で削除する。 */
@@ -180,8 +215,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.sessions = this.index.sessions.filter((s) => s.id !== id);
-    await this.persist();
+    await this.mutate(() => this.removeEntry("sessions", id));
   }
 
   /** 写真エントリを追加する。 */
@@ -189,8 +223,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.photos.push(...this.cloneEntries([entry]));
-    await this.persist();
+    await this.mutate(() => this.upsertEntry("photos", entry, false));
   }
 
   /** 写真エントリを ID で削除する。 */
@@ -198,8 +231,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.photos = this.index.photos.filter((p) => p.id !== id);
-    await this.persist();
+    await this.mutate(() => this.removeEntry("photos", id));
   }
 
   /** 記事エントリを追加する。同一 ID が既存の場合は置換（upsert）。 */
@@ -207,9 +239,7 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.articles = this.index.articles.filter((a) => a.id !== entry.id);
-    this.index.articles.push(...this.cloneEntries([entry]));
-    await this.persist();
+    await this.mutate(() => this.upsertEntry("articles", entry, true));
   }
 
   /** 記事エントリを ID で削除する。 */
@@ -217,7 +247,6 @@ export class IndexManager {
     if (!this.index) {
       throw new Error("IndexManager: load() を先に呼び出してください。");
     }
-    this.index.articles = this.index.articles.filter((a) => a.id !== id);
-    await this.persist();
+    await this.mutate(() => this.removeEntry("articles", id));
   }
 }

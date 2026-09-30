@@ -16,6 +16,8 @@ npm install
 npm run dev       # 開発サーバー起動 (http://localhost:3000)
 npm run build     # next build → Static Export (out/)
 npm run lint      # eslint src/
+npm test          # vitest run（ユニットテスト）
+npm run test:coverage  # カバレッジ付きで実行
 ```
 
 ## 技術スタック
@@ -27,6 +29,7 @@ npm run lint      # eslint src/
 - **react-dropzone** — ファイルアップロード
 - **@react-oauth/google** — Google OAuth (クライアントのみ)
 - **Tesseract.js** — ブラウザ内 OCR (WebAssembly)
+- **Vitest** — ユニットテスト（Node 環境）
 - **OpenCV.js** — 画像補正・段落検出 (WebAssembly) ※今後実装
 
 ## コーディング規約
@@ -49,6 +52,14 @@ npm run lint      # eslint src/
 ### ESLint
 - `eslint-config-next/core-web-vitals` を使用
 - `npm run lint` で `src/` を対象にチェック
+
+## テスト
+
+- フレームワークは **Vitest**（`vitest.config.mjs`、`@/*` エイリアス対応、環境は `node`）。テストは `src/**/*.test.ts` に対象ファイルと同じ場所へ配置する
+- テストコード・`describe` / `it` の説明は日本語で記述する
+- Drive 依存のマネージャー（`IndexManager` / `SettingsManager` / `SessionManager` / `ArticleManager` / `PhotoImporter`）は `src/test/fake-drive-client.ts` のインメモリ `FakeDriveClient` で検証する。`DriveClient` 自身は `fetch` をスタブして検証する
+- Canvas / Worker / OpenCV に依存する処理はテスト対象外。ロジックは画素配列・プロファイルを受け取る Canvas 非依存の関数（`*FromPixels` / `*FromProfile`）に切り出してテストする
+- CI（`.github/workflows/test.yml`）で PR ごとに `npm test` を実行する
 
 ## アーキテクチャ上の重要事項
 
