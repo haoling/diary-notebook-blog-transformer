@@ -724,7 +724,7 @@ export type DetectPageRectOptions = {
 const PAGE_RUN_GAP_RATIO = 0.03;
 /** 矩形内の「ページ色」画素の割合の下限（背景の混入した矩形を除外する） */
 const PAGE_RECT_MIN_FILL_RATIO = 0.6;
-/** 検出矩形が探索範囲をほぼ全体覆っているとみなす比率（境界が見つかっていない） */
+/** 検出矩形がある軸で探索範囲をほぼ全域覆っているとみなす比率（その軸の境界が見つかっていない） */
 const PAGE_RECT_FULL_COVER_RATIO = 0.98;
 
 /**
@@ -768,6 +768,21 @@ export function detectPageRectFromPixels(
   } = options;
   if (!(expectedAspectRatio > 0) || !Number.isFinite(expectedAspectRatio)) {
     throw new RangeError(`expectedAspectRatio は正の有限値で指定してください: ${expectedAspectRatio}`);
+  }
+  if (!Number.isFinite(colorDistanceThreshold) || colorDistanceThreshold < 0) {
+    throw new RangeError(`colorDistanceThreshold は 0 以上の有限値で指定してください: ${colorDistanceThreshold}`);
+  }
+  if (!Number.isFinite(profileRatioThreshold) || profileRatioThreshold <= 0 || profileRatioThreshold > 1) {
+    throw new RangeError(`profileRatioThreshold は 0 より大きく 1 以下で指定してください: ${profileRatioThreshold}`);
+  }
+  if (!Number.isFinite(aspectToleranceRatio) || aspectToleranceRatio < 0) {
+    throw new RangeError(`aspectToleranceRatio は 0 以上の有限値で指定してください: ${aspectToleranceRatio}`);
+  }
+  if (!Number.isFinite(minPageAreaRatio) || minPageAreaRatio < 0 || minPageAreaRatio > 1) {
+    throw new RangeError(`minPageAreaRatio は 0 以上 1 以下で指定してください: ${minPageAreaRatio}`);
+  }
+  if (!Number.isInteger(maxSamples) || maxSamples <= 0) {
+    throw new RangeError(`maxSamples は正の整数で指定してください: ${maxSamples}`);
   }
   if (width <= 0 || height <= 0 || data.length < width * height * 4) return null;
 
@@ -821,8 +836,9 @@ export function detectPageRectFromPixels(
   const rectH = Math.min(height, (rowRun.end + 1) * step) - y;
   if (rectW <= 0 || rectH <= 0) return null;
 
-  // 3. 背景がページ色に近く境界が見つからない場合（探索範囲のほぼ全体を覆う）は null
-  if (rectW / width >= PAGE_RECT_FULL_COVER_RATIO && rectH / height >= PAGE_RECT_FULL_COVER_RATIO) {
+  // 3. 背景がページ色に近く境界が見つからない場合は null。
+  // 探索範囲はガイド枠より広いため、どちらか一方の軸でも全域を覆うなら四辺を確定できていない
+  if (rectW / width >= PAGE_RECT_FULL_COVER_RATIO || rectH / height >= PAGE_RECT_FULL_COVER_RATIO) {
     return null;
   }
 
