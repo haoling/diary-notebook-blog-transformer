@@ -6,7 +6,11 @@
  */
 
 import type { CropRect, ParagraphObject, SplitResult } from "@/types/scan";
-import type { NotebookProfile, RgbColor } from "@/types/settings";
+import type {
+  NotebookCalibration,
+  NotebookProfile,
+  RgbColor,
+} from "@/types/settings";
 
 /**
  * ParagraphObject[] から SplitResult を生成する。
@@ -47,6 +51,25 @@ export function lineYRatiosToPixelYs(
   imageHeightPx: number,
 ): number[] {
   return lineYRatios.map((ratio) => ratio * imageHeightPx);
+}
+
+/**
+ * 検出した罫線の y 座標（px）・画像サイズ・地色から NotebookCalibration を組み立てる。
+ * 罫線は画像高さに対する比率へ変換して保存する。
+ */
+export function buildNotebookCalibration(
+  lineYs: number[],
+  imageHeightPx: number,
+  imageWidthPx: number,
+  referenceColor: RgbColor,
+): NotebookCalibration {
+  return {
+    calibratedAt: new Date().toISOString(),
+    lineYRatios: pixelYsToLineYRatios(lineYs, imageHeightPx),
+    sourceImageHeightPx: imageHeightPx,
+    sourceImageWidthPx: imageWidthPx,
+    referenceColor: { ...referenceColor },
+  };
 }
 
 // ---------------------------------------------------------------------------
