@@ -269,6 +269,13 @@ describe("splitByCalibratedGridFromPixels", () => {
     expect(bands[3].cropRect).toEqual({ x: 0, y: 30, width: W, height: 10 });
   });
 
+  it("完全透明な画素はインクとして数えず、透明な画像は段落 0 件になる", () => {
+    const transparent = new Uint8ClampedArray(W * H * 4);
+    const { paragraphs, bands } = splitByCalibratedGridFromPixels(transparent, W, H, ratios);
+    expect(paragraphs).toHaveLength(0);
+    expect(bands.every((b) => b.isBlank)).toBe(true);
+  });
+
   it("罫線そのもの（帯の境界上の暗線）は内容として数えない", () => {
     const data = solidPixels(W * H, white);
     for (let i = 0; i <= 10; i++) {

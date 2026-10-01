@@ -1005,6 +1005,8 @@ export function splitByCalibratedGridFromPixels(
       const row = y * width * 4;
       for (let x = x0; x < x1; x++) {
         const p = row + x * 4;
+        // 完全に透明な画素（画像外の余白など）は母数にも暗ピクセルにも数えない
+        if (data[p + 3] === 0) continue;
         if (0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2] < darkThreshold) dark++;
         total++;
       }
