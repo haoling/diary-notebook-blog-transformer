@@ -8,6 +8,7 @@ import {
   lineYRatiosToPixelYs,
   pixelYsToLineYRatios,
   sampleBackgroundColorFromPixels,
+  splitByCalibratedGridFromPixels,
 } from "./notebook-calibration";
 import type { NotebookProfile, RgbColor } from "@/types/settings";
 
@@ -225,5 +226,77 @@ describe("detectPageRectFromPixels", () => {
       RangeError,
     );
     expect(() => detectPageRectFromPixels(data, 2, 2, page, 1, { minPageAreaRatio: 2 })).toThrow(RangeError);
+  });
+});
+
+describe("splitByCalibratedGridFromPixels", () => {
+  const W = 100;
+  const H = 100;
+  // 罫線は 10px 間隔で 0..100（比率 0..1 を 11 本 → 10 帯）
+  const ratios = Array.from({ length: 11 }, (_, i) => i / 10);
+  const white = { r: 255, g: 255, b: 255 };
+
+  /** 指定した帯（0 始まり）の中央にインク（黒の横線）を描く。 */
+  function pageWithInk(inkBands: number[]): Uint8ClampedArray {
+    const data = solidPixels(W * H, white);
+    for (const b of inkBands) {
+      const y = b * 10 + 5;
+      for (let x = 10; x < 90; x++) data.set([0, 0, 0, 255], (y * W + x) * 4);
+    }
+    return data;
+  }
+
+  it("空白帯が除去され、連続する内容帯が 1 段落にマージされる", () => {
+    const { paragraphs } = splitByCalibratedGridFromPixels(pageWithInk([1, 2, 5]), W, H, ratios);
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0].cropRect).toEqual({ x: 0, y: 10, width: W, height: 20 });
+    expect(paragraphs[1].cropRect).toEqual({ x: 0, y: 50, width: W, height: 10 });
+    expect(paragraphs.map((p) => p.order)).toEqual([0, 1]);
+  });
+
+  it("白紙画像では段落が 0 件になる", () => {
+    const { paragraphs, bands } = splitByCalibratedGridFromPixels(solidPixels(W * H, white), W, H, ratios);
+    expect(paragraphs).toHaveLength(0);
+    expect(bands).toHaveLength(10);
+  });
+
+  it("bands に空白を含む全帯の判定結果が入る", () => {
+    const { bands } = splitByCalibratedGridFromPixels(pageWithInk([0, 9]), W, H, ratios);
+    expect(bands).toHaveLength(10);
+    expect(bands.map((b) => b.isBlank)).toEqual([
+      false, true, true, true, true, true, true, true, true, false,
+    ]);
+    expect(bands[3].cropRect).toEqual({ x: 0, y: 30, width: W, height: 10 });
+  });
+
+  it("完全透明な画素はインクとして数えず、透明な画像は段落 0 件になる", () => {
+    const transparent = new Uint8ClampedArray(W * H * 4);
+    const { paragraphs, bands } = splitByCalibratedGridFromPixels(transparent, W, H, ratios);
+    expect(paragraphs).toHaveLength(0);
+    expect(bands.every((b) => b.isBlank)).toBe(true);
+  });
+
+  it("罫線そのもの（帯の境界上の暗線）は内容として数えない", () => {
+    const data = solidPixels(W * H, white);
+    for (let i = 0; i <= 10; i++) {
+      const y = Math.min(H - 1, i * 10);
+      for (let x = 0; x < W; x++) data.set([0, 0, 0, 255], (y * W + x) * 4);
+    }
+    expect(splitByCalibratedGridFromPixels(data, W, H, ratios).paragraphs).toHaveLength(0);
+  });
+
+  it("罫線比率が NaN・無限大・0..1 の範囲外なら RangeError", () => {
+    const data = pageWithInk([]);
+    for (const bad of [NaN, Infinity, -0.1, 1.1]) {
+      expect(() => splitByCalibratedGridFromPixels(data, W, H, [0, bad, 1])).toThrow(RangeError);
+    }
+  });
+
+  it("罫線が 2 本未満・サイズ 0 なら空を返し、不正な閾値は RangeError", () => {
+    expect(splitByCalibratedGridFromPixels(pageWithInk([1]), W, H, [0.5])).toEqual({ paragraphs: [], bands: [] });
+    expect(splitByCalibratedGridFromPixels(new Uint8ClampedArray(0), 0, 0, ratios).bands).toEqual([]);
+    expect(() =>
+      splitByCalibratedGridFromPixels(pageWithInk([]), W, H, ratios, { blankDensityThreshold: 2 }),
+    ).toThrow(RangeError);
   });
 });

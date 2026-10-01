@@ -899,3 +899,147 @@ function longestRun(
   }
   return best;
 }
+
+// ---------------------------------------------------------------------------
+// 罫線グリッドによる段落分割（splitByCalibratedGrid）
+// ---------------------------------------------------------------------------
+
+/** splitByCalibratedGrid のオプション。 */
+export type SplitByCalibratedGridOptions = {
+  /** 暗ピクセルとみなす輝度（0..255）の上限（既定 110）。薄い罫線を拾わないよう低めにする */
+  darkLuminanceThreshold?: number;
+  /** 帯を「空白行」とみなすインク密度（暗ピクセル比率）の閾値（既定 0.003） */
+  blankDensityThreshold?: number;
+};
+
+/** 帯ごとの判定結果。 */
+export type CalibratedGridBand = { cropRect: CropRect; isBlank: boolean };
+
+/** splitByCalibratedGrid の結果。 */
+export type CalibratedGridSplit = {
+  /** 空白帯を除き、連続する内容帯をマージした段落 */
+  paragraphs: ParagraphObject[];
+  /** 全帯（空白含む）の判定結果。手動修正 UI 用 */
+  bands: CalibratedGridBand[];
+};
+
+const DEFAULT_DARK_LUMINANCE = 110;
+const DEFAULT_BLANK_DENSITY = 0.003;
+/** インク密度の計測から除外する帯の上下端の比率（罫線自体を数えないため） */
+const BAND_VERTICAL_INSET_RATIO = 0.15;
+/** インク密度の計測から除外する左右端の比率 */
+const BAND_HORIZONTAL_INSET_RATIO = 0.05;
+
+function generateParagraphId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+/**
+ * 罫線 y 座標の比率からグリッド帯を作り、空白行を除いた段落に分割する。
+ *
+ * 1. 比率を現在の画像高さに変換して帯（隣接する罫線間）を得る
+ * 2. 各帯のインク密度を計測し、閾値未満を空白帯とする
+ * 3. 連続する非空白帯を 1 つの ParagraphObject にマージする
+ */
+export async function splitByCalibratedGrid(
+  source: RuledLineSource,
+  lineYRatios: number[],
+  options: SplitByCalibratedGridOptions = {},
+): Promise<CalibratedGridSplit> {
+  const { width, height } = getSourceSize(source);
+  if (width <= 0 || height <= 0) return { paragraphs: [], bands: [] };
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("Canvas 2D コンテキストを取得できませんでした");
+  ctx.drawImage(source, 0, 0);
+  const { data } = ctx.getImageData(0, 0, width, height);
+  return splitByCalibratedGridFromPixels(data, width, height, lineYRatios, options);
+}
+
+/**
+ * RGBA 画素配列から罫線グリッド帯の分割を行う。splitByCalibratedGrid の Canvas 非依存部分。
+ */
+export function splitByCalibratedGridFromPixels(
+  data: ArrayLike<number>,
+  width: number,
+  height: number,
+  lineYRatios: number[],
+  options: SplitByCalibratedGridOptions = {},
+): CalibratedGridSplit {
+  const darkThreshold = options.darkLuminanceThreshold ?? DEFAULT_DARK_LUMINANCE;
+  const blankThreshold = options.blankDensityThreshold ?? DEFAULT_BLANK_DENSITY;
+  if (!(darkThreshold >= 0 && darkThreshold <= 255)) {
+    throw new RangeError("darkLuminanceThreshold は 0〜255 で指定してください");
+  }
+  if (!(blankThreshold >= 0 && blankThreshold <= 1)) {
+    throw new RangeError("blankDensityThreshold は 0〜1 で指定してください");
+  }
+  if (width <= 0 || height <= 0 || data.length < width * height * 4) {
+    return { paragraphs: [], bands: [] };
+  }
+
+  if (lineYRatios.some((r) => !Number.isFinite(r) || r < 0 || r > 1)) {
+    throw new RangeError("lineYRatios は 0〜1 の有限な値で指定してください");
+  }
+
+  const ys = lineYRatiosToPixelYs(lineYRatios, height)
+    .map((y) => Math.min(height, Math.max(0, Math.round(y))))
+    .sort((a, b) => a - b)
+    .filter((y, i, arr) => i === 0 || y !== arr[i - 1]);
+
+  const x0 = Math.floor(width * BAND_HORIZONTAL_INSET_RATIO);
+  const x1 = Math.max(x0 + 1, width - x0);
+
+  const bands: CalibratedGridBand[] = [];
+  for (let i = 0; i + 1 < ys.length; i++) {
+    const top = ys[i];
+    const bottom = ys[i + 1];
+    const bandH = bottom - top;
+    if (bandH <= 0) continue;
+
+    const inset = Math.floor(bandH * BAND_VERTICAL_INSET_RATIO);
+    const y0 = top + inset;
+    const y1 = Math.max(y0 + 1, bottom - inset);
+    let dark = 0;
+    let total = 0;
+    for (let y = y0; y < y1; y++) {
+      const row = y * width * 4;
+      for (let x = x0; x < x1; x++) {
+        const p = row + x * 4;
+        // 完全に透明な画素（画像外の余白など）は母数にも暗ピクセルにも数えない
+        if (data[p + 3] === 0) continue;
+        if (0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2] < darkThreshold) dark++;
+        total++;
+      }
+    }
+    const density = total > 0 ? dark / total : 0;
+    bands.push({
+      cropRect: { x: 0, y: top, width, height: bandH },
+      isBlank: density < blankThreshold,
+    });
+  }
+
+  const paragraphs: ParagraphObject[] = [];
+  let runStart = -1;
+  const flush = (endExclusive: number) => {
+    if (runStart < 0) return;
+    const first = bands[runStart].cropRect;
+    const last = bands[endExclusive - 1].cropRect;
+    paragraphs.push({
+      id: generateParagraphId(),
+      order: paragraphs.length,
+      cropRect: { x: 0, y: first.y, width, height: last.y + last.height - first.y },
+    });
+    runStart = -1;
+  };
+  bands.forEach((band, i) => {
+    if (band.isBlank) flush(i);
+    else if (runStart < 0) runStart = i;
+  });
+  flush(bands.length);
+
+  return { paragraphs, bands };
+}
