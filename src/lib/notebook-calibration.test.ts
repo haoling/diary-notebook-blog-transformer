@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildNotebookCalibration,
   computeColorMatchAdjustments,
   computeColorMatchAdjustmentsFromPixels,
   computeExpectedPitchPx,
@@ -298,5 +299,26 @@ describe("splitByCalibratedGridFromPixels", () => {
     expect(() =>
       splitByCalibratedGridFromPixels(pageWithInk([]), W, H, ratios, { blankDensityThreshold: 2 }),
     ).toThrow(RangeError);
+  });
+});
+
+describe("buildNotebookCalibration", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("NotebookCalibration の各フィールドを正しく組み立てる", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-02T03:04:05.000Z"));
+    const color = { r: 240, g: 235, b: 220 };
+    const result = buildNotebookCalibration([300, 100, 200], 400, 300, color);
+    expect(result).toEqual({
+      calibratedAt: "2026-01-02T03:04:05.000Z",
+      lineYRatios: [0.25, 0.5, 0.75],
+      sourceImageHeightPx: 400,
+      sourceImageWidthPx: 300,
+      referenceColor: { r: 240, g: 235, b: 220 },
+    });
+    expect(result.referenceColor).not.toBe(color);
   });
 });
