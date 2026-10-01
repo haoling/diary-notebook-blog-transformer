@@ -285,6 +285,13 @@ describe("splitByCalibratedGridFromPixels", () => {
     expect(splitByCalibratedGridFromPixels(data, W, H, ratios).paragraphs).toHaveLength(0);
   });
 
+  it("罫線比率が NaN・無限大・0..1 の範囲外なら RangeError", () => {
+    const data = pageWithInk([]);
+    for (const bad of [NaN, Infinity, -0.1, 1.1]) {
+      expect(() => splitByCalibratedGridFromPixels(data, W, H, [0, bad, 1])).toThrow(RangeError);
+    }
+  });
+
   it("罫線が 2 本未満・サイズ 0 なら空を返し、不正な閾値は RangeError", () => {
     expect(splitByCalibratedGridFromPixels(pageWithInk([1]), W, H, [0.5])).toEqual({ paragraphs: [], bands: [] });
     expect(splitByCalibratedGridFromPixels(new Uint8ClampedArray(0), 0, 0, ratios).bands).toEqual([]);

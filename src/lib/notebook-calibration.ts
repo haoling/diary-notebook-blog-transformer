@@ -981,6 +981,10 @@ export function splitByCalibratedGridFromPixels(
     return { paragraphs: [], bands: [] };
   }
 
+  if (lineYRatios.some((r) => !Number.isFinite(r) || r < 0 || r > 1)) {
+    throw new RangeError("lineYRatios は 0〜1 の有限な値で指定してください");
+  }
+
   const ys = lineYRatiosToPixelYs(lineYRatios, height)
     .map((y) => Math.min(height, Math.max(0, Math.round(y))))
     .sort((a, b) => a - b)
