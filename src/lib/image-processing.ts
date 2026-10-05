@@ -365,6 +365,31 @@ export function applyBrightnessContrast(
 }
 
 // ---------------------------------------------------------------------------
+// 彩度（Saturation）
+// ---------------------------------------------------------------------------
+
+/**
+ * Canvas API の filter プロパティを使用して彩度を調整する。
+ * amount は -100〜100 の範囲を想定（0 = 変更なし、-100 = グレースケール）。
+ */
+export function applySaturation(
+  source: ImageSource,
+  amount: number,
+): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = getSourceWidth(source);
+  canvas.height = getSourceHeight(source);
+  const ctx = canvas.getContext("2d")!;
+
+  if (amount !== 0) {
+    ctx.filter = `saturate(${Math.max(0, 1 + amount / 100)})`;
+  }
+  ctx.drawImage(source, 0, 0);
+
+  return canvas;
+}
+
+// ---------------------------------------------------------------------------
 // シャープネス（Sharpness / Unsharp Mask）
 // ---------------------------------------------------------------------------
 
@@ -441,8 +466,9 @@ export function applySharpen(
  * 1. 台形補正（OpenCV.js warpPerspective）
  * 2. 回転（Canvas API）
  * 3. 明るさ・コントラスト（Canvas API filter）
- * 4. シャープネス（ピクセル演算）
- * 5. 地色除去（RGB の各チャンネルが threshold 以上のピクセルを純白に置換）
+ * 4. 彩度（Canvas API filter）
+ * 5. シャープネス（ピクセル演算）
+ * 6. 地色除去（RGB の各チャンネルが threshold 以上のピクセルを純白に置換）
  *
  * `correction.skipped` が true の場合は補正をスキップし、元画像をそのまま Canvas に描画して返す。
  */
@@ -473,13 +499,19 @@ export async function applyCorrections(
     current = applyBrightnessContrast(current, brightness, contrast);
   }
 
-  // 4. シャープネス
+  // 4. 彩度
+  const saturation = correction.adjustments?.saturation ?? 0;
+  if (saturation !== 0) {
+    current = applySaturation(current, saturation);
+  }
+
+  // 5. シャープネス
   const sharpness = correction.adjustments?.sharpness ?? 0;
   if (sharpness > 0) {
     current = applySharpen(current, sharpness);
   }
 
-  // 5. 地色除去
+  // 6. 地色除去
   if (correction.adjustments?.backgroundRemoval) {
     current = applyBackgroundRemoval(current);
   }
