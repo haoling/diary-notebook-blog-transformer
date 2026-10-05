@@ -417,28 +417,25 @@ export function applySharpen(
   const a = Math.min(amount / 100, 3);
   const center = 1 + 4 * a;
   const edge = -a;
-  // 3x3 sharpening kernel: [0, -a, 0, -a, 1+4a, -a, 0, -a, 0]
+  // 4 近傍シャープニングカーネル: [0, -a, 0, -a, 1+4a, -a, 0, -a, 0]
+  // 係数の総和が 1 になるため、平坦な領域の明るさは変わらない。
 
   for (let y = 1; y < srcH - 1; y++) {
     for (let x = 1; x < srcW - 1; x++) {
       for (let c = 0; c < 3; c++) {
-        const idx00 = ((y - 1) * srcW + (x - 1)) * 4 + c;
         const idx01 = ((y - 1) * srcW + x) * 4 + c;
-        const idx02 = ((y - 1) * srcW + (x + 1)) * 4 + c;
         const idx10 = (y * srcW + (x - 1)) * 4 + c;
         const idx11 = (y * srcW + x) * 4 + c;
         const idx12 = (y * srcW + (x + 1)) * 4 + c;
-        const idx20 = ((y + 1) * srcW + (x - 1)) * 4 + c;
         const idx21 = ((y + 1) * srcW + x) * 4 + c;
-        const idx22 = ((y + 1) * srcW + (x + 1)) * 4 + c;
 
         output[idx11] = Math.min(
           255,
           Math.max(
             0,
-            edge * src[idx00] + edge * src[idx01] + edge * src[idx02] +
+            edge * src[idx01] +
             edge * src[idx10] + center * src[idx11] + edge * src[idx12] +
-            edge * src[idx20] + edge * src[idx21] + edge * src[idx22],
+            edge * src[idx21],
           ),
         );
       }
