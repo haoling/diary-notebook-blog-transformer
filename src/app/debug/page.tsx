@@ -8,6 +8,7 @@ import { useGooglePicker } from "@/lib/use-google-picker";
 import { SettingsManager } from "@/lib/settings-manager";
 import { IndexManager } from "@/lib/index-manager";
 import { useInitializeApp } from "@/lib/use-initialize-app";
+import { ImageCaptureModule } from "@/components/ImageCaptureModule";
 import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { NOTEBOOK_SIZE_PRESETS, LINE_HEIGHT_PRESETS } from "@/lib/notebook-presets";
 import {
@@ -82,6 +83,12 @@ export default function DebugPage() {
   const [ncColorR, setNcColorR] = useState("255");
   const [ncColorG, setNcColorG] = useState("255");
   const [ncColorB, setNcColorB] = useState("255");
+
+  // ImageCaptureModule ガイド枠テスト
+  const [gcPreset, setGcPreset] = useState<NotebookSizePreset>("a5");
+  const [gcWidthMm, setGcWidthMm] = useState(String(NOTEBOOK_SIZE_PRESETS.a5.widthMm));
+  const [gcHeightMm, setGcHeightMm] = useState(String(NOTEBOOK_SIZE_PRESETS.a5.heightMm));
+  const [gcEnabled, setGcEnabled] = useState(true);
 
   // notebook-calibration 変換関数テスト
   const [ccImageHeightPx, setCcImageHeightPx] = useState("1000");
@@ -1797,6 +1804,72 @@ export default function DebugPage() {
                 </div>
               </details>
             )}
+          </div>
+        </div>
+
+        {/* ImageCaptureModule ガイド枠テスト */}
+        <div className="mt-8 bg-white rounded-2xl shadow-sm border border-rose-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-rose-100 bg-rose-50">
+            <h2 className="font-semibold text-rose-700">
+              📷 ImageCaptureModule ガイド枠確認
+            </h2>
+          </div>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-600">
+              カメラプレビューに重ねるガイド枠（一時的な確認用）。撮影した画像は保存せず破棄します。
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <label className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={gcEnabled}
+                  onChange={(e) => setGcEnabled(e.target.checked)}
+                />
+                ガイド枠を表示
+              </label>
+              <select
+                value={gcPreset}
+                onChange={(e) => {
+                  const preset = e.target.value as NotebookSizePreset;
+                  setGcPreset(preset);
+                  if (preset !== "custom") {
+                    setGcWidthMm(String(NOTEBOOK_SIZE_PRESETS[preset].widthMm));
+                    setGcHeightMm(String(NOTEBOOK_SIZE_PRESETS[preset].heightMm));
+                  }
+                }}
+                className="border border-slate-300 rounded px-2 py-1"
+              >
+                {(Object.keys(NOTEBOOK_SIZE_PRESETS) as NotebookSizePreset[]).map((key) => (
+                  <option key={key} value={key}>{key}</option>
+                ))}
+                <option value="custom">custom</option>
+              </select>
+              <input
+                type="number"
+                value={gcWidthMm}
+                onChange={(e) => { setGcPreset("custom"); setGcWidthMm(e.target.value); }}
+                className="w-20 border border-slate-300 rounded px-2 py-1"
+                aria-label="幅 (mm)"
+              />
+              ×
+              <input
+                type="number"
+                value={gcHeightMm}
+                onChange={(e) => { setGcPreset("custom"); setGcHeightMm(e.target.value); }}
+                className="w-20 border border-slate-300 rounded px-2 py-1"
+                aria-label="高さ (mm)"
+              />
+              mm
+            </div>
+            <ImageCaptureModule
+              onCapture={async () => {}}
+              guideAspectRatio={
+                gcEnabled && Number(gcWidthMm) > 0 && Number(gcHeightMm) > 0
+                  ? Number(gcWidthMm) / Number(gcHeightMm)
+                  : undefined
+              }
+              guideLabel={`${gcWidthMm} × ${gcHeightMm} mm`}
+            />
           </div>
         </div>
 

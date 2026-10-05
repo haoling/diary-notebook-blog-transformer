@@ -5,6 +5,10 @@ import { useState, useRef, useCallback, useEffect } from "react";
 type ImageCaptureModuleProps = {
   onCapture: (blob: Blob, fileName: string) => Promise<void>;
   disabled?: boolean;
+  /** ガイド枠のアスペクト比（pageWidthMm / pageHeightMm）。未指定ならガイド枠を表示しない */
+  guideAspectRatio?: number;
+  /** ガイド枠の下に表示するラベル */
+  guideLabel?: string;
 };
 
 /**
@@ -16,6 +20,8 @@ type ImageCaptureModuleProps = {
 export const ImageCaptureModule = ({
   onCapture,
   disabled = false,
+  guideAspectRatio,
+  guideLabel,
 }: ImageCaptureModuleProps) => {
   const [streaming, setStreaming] = useState(false);
   const [capturing, setCapturing] = useState(false);
@@ -130,6 +136,31 @@ export const ImageCaptureModule = ({
           className="w-full h-auto"
         />
         <canvas ref={canvasRef} className="hidden" />
+        {guideAspectRatio !== undefined &&
+          Number.isFinite(guideAspectRatio) &&
+          guideAspectRatio > 0 && (
+            // コンテナクエリ単位で、映像に収まる最大（90%）のアスペクト比固定矩形を中央に置く
+            <div
+              className="pointer-events-none absolute inset-0 flex items-center justify-center"
+              style={{ containerType: "size" }}
+              data-testid="capture-guide-overlay"
+            >
+              <div
+                className="relative border-2 border-dashed border-white"
+                style={{
+                  aspectRatio: String(guideAspectRatio),
+                  width: `min(90cqw, calc(90cqh * ${guideAspectRatio}))`,
+                  boxShadow: "0 0 0 9999px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                {guideLabel && (
+                  <span className="absolute left-1/2 top-1 -translate-x-1/2 whitespace-nowrap rounded bg-black/60 px-2 py-0.5 text-xs text-white">
+                    {guideLabel}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-3">
           <button
             type="button"
