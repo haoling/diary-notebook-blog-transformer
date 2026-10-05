@@ -56,10 +56,7 @@ export const ImageCaptureModule = ({
         },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      // <video> は streaming 中にのみ描画されるため、ストリームの接続は描画後の effect で行う
       setStreaming(true);
     } catch (err) {
       stopCamera();
@@ -78,6 +75,17 @@ export const ImageCaptureModule = ({
       stopCamera();
     };
   }, [stopCamera]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!streaming || !video || !stream) return;
+    video.srcObject = stream;
+    video.play().catch(() => {
+      setError("カメラ映像の再生に失敗しました。");
+      stopCamera();
+    });
+  }, [streaming, stopCamera]);
 
   const capture = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
