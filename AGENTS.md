@@ -85,6 +85,15 @@ npm run test:coverage  # カバレッジ付きで実行
 - `images.unoptimized: true` — Static Export では必須
 - `basePath` — `NEXT_PUBLIC_BASE_PATH` 環境変数で設定（GitHub Pages のサブディレクトリ対応）
 
+## 実機テストのチェックリスト
+
+カメラ・タッチ操作・ブラウザ API など、実機でしか確認できない変更を含む PR では、PR 本文に「実機テスト」セクションをチェックリスト形式（`- [ ]`）で書く。
+
+- ブランチは GitHub Pages にデプロイして確認する前提のため、`npm install` / `npm run dev` などのローカル起動手順は書かない
+- アクセスする URL（例: `https://haoling.github.io/diary-notebook-blog-transformer/debug/`）と、画面上でどこを操作するか（ボタン名・入力欄・選択肢）を具体的に書く
+- 各項目は「操作 → 期待する表示・挙動」の形にし、正常系に加えて境界・無指定時の挙動も含める
+- 確認できないものは実施済みと書かず、チェックリストの未チェック項目として残す
+
 ## プルリクエストのレビューフロー
 
 プルリク作成後は以下のサイクルで Copilot レビューを行い、すべての指摘が解消されるまで反復する。
