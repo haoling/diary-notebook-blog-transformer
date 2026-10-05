@@ -365,6 +365,31 @@ export function applyBrightnessContrast(
 }
 
 // ---------------------------------------------------------------------------
+// 彩度（Saturation）
+// ---------------------------------------------------------------------------
+
+/**
+ * Canvas API の filter プロパティを使用して彩度を調整する。
+ * amount は -100〜100 の範囲を想定（0 = 変更なし、-100 = グレースケール）。
+ */
+export function applySaturation(
+  source: ImageSource,
+  amount: number,
+): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = getSourceWidth(source);
+  canvas.height = getSourceHeight(source);
+  const ctx = canvas.getContext("2d")!;
+
+  if (amount !== 0) {
+    ctx.filter = `saturate(${Math.max(0, 1 + amount / 100)})`;
+  }
+  ctx.drawImage(source, 0, 0);
+
+  return canvas;
+}
+
+// ---------------------------------------------------------------------------
 // シャープネス（Sharpness / Unsharp Mask）
 // ---------------------------------------------------------------------------
 
@@ -392,28 +417,25 @@ export function applySharpen(
   const a = Math.min(amount / 100, 3);
   const center = 1 + 4 * a;
   const edge = -a;
-  // 3x3 sharpening kernel: [0, -a, 0, -a, 1+4a, -a, 0, -a, 0]
+  // 4 近傍シャープニングカーネル: [0, -a, 0, -a, 1+4a, -a, 0, -a, 0]
+  // 係数の総和が 1 になるため、平坦な領域の明るさは変わらない。
 
   for (let y = 1; y < srcH - 1; y++) {
     for (let x = 1; x < srcW - 1; x++) {
       for (let c = 0; c < 3; c++) {
-        const idx00 = ((y - 1) * srcW + (x - 1)) * 4 + c;
         const idx01 = ((y - 1) * srcW + x) * 4 + c;
-        const idx02 = ((y - 1) * srcW + (x + 1)) * 4 + c;
         const idx10 = (y * srcW + (x - 1)) * 4 + c;
         const idx11 = (y * srcW + x) * 4 + c;
         const idx12 = (y * srcW + (x + 1)) * 4 + c;
-        const idx20 = ((y + 1) * srcW + (x - 1)) * 4 + c;
         const idx21 = ((y + 1) * srcW + x) * 4 + c;
-        const idx22 = ((y + 1) * srcW + (x + 1)) * 4 + c;
 
         output[idx11] = Math.min(
           255,
           Math.max(
             0,
-            edge * src[idx00] + edge * src[idx01] + edge * src[idx02] +
+            edge * src[idx01] +
             edge * src[idx10] + center * src[idx11] + edge * src[idx12] +
-            edge * src[idx20] + edge * src[idx21] + edge * src[idx22],
+            edge * src[idx21],
           ),
         );
       }
@@ -441,8 +463,9 @@ export function applySharpen(
  * 1. 台形補正（OpenCV.js warpPerspective）
  * 2. 回転（Canvas API）
  * 3. 明るさ・コントラスト（Canvas API filter）
- * 4. シャープネス（ピクセル演算）
- * 5. 地色除去（RGB の各チャンネルが threshold 以上のピクセルを純白に置換）
+ * 4. 彩度（Canvas API filter）
+ * 5. シャープネス（ピクセル演算）
+ * 6. 地色除去（RGB の各チャンネルが threshold 以上のピクセルを純白に置換）
  *
  * `correction.skipped` が true の場合は補正をスキップし、元画像をそのまま Canvas に描画して返す。
  */
@@ -473,13 +496,19 @@ export async function applyCorrections(
     current = applyBrightnessContrast(current, brightness, contrast);
   }
 
-  // 4. シャープネス
+  // 4. 彩度
+  const saturation = correction.adjustments?.saturation ?? 0;
+  if (saturation !== 0) {
+    current = applySaturation(current, saturation);
+  }
+
+  // 5. シャープネス
   const sharpness = correction.adjustments?.sharpness ?? 0;
   if (sharpness > 0) {
     current = applySharpen(current, sharpness);
   }
 
-  // 5. 地色除去
+  // 6. 地色除去
   if (correction.adjustments?.backgroundRemoval) {
     current = applyBackgroundRemoval(current);
   }

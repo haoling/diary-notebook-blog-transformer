@@ -380,12 +380,9 @@ export function PerspectiveCorrectionUI({
       clearTimeout(previewTimerRef.current);
     }
 
-    // 前回のプレビュー URL を破棄
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-    }
-
+    // 更新中も前回のプレビューを表示し続ける（消すとプレビュー領域の高さが変わり、
+    // 下のコントロールパネルが上下に動いて操作しづらくなるため）。
+    // 古い URL の破棄は previewUrl 変更時のクリーンアップ effect が行う。
     setPreviewLoading(true);
     const requestId = ++previewRequestIdRef.current;
     previewTimerRef.current = setTimeout(async () => {
@@ -433,7 +430,6 @@ export function PerspectiveCorrectionUI({
       }
       previewRequestIdRef.current = -1;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrl, imageSize, buildCorrectionResult]);
 
   // ---- プレビュー URL のクリーンアップ ----
